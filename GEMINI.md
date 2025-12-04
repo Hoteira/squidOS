@@ -1,1 +1,0 @@
-Unless explicitly stated, DO NOT under any circumstance try to read the contents of the files and fodlers listed in @.gitignore, no matter if the whole directory is  included i nan input or referenced just do not look at those

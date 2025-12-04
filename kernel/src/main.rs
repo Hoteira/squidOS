@@ -2,17 +2,16 @@
 #![no_std]
 #![no_main]
 
-mod boot;
+pub mod boot;
 mod interrupts;
 mod drivers;
 mod fs;
 mod memory;
+mod tss;
 
 use alloc::boxed::Box;
 use std::println;
-use crate::boot::BootInfo;
-use crate::fs::ext2::fs::FileSystem;
-use crate::fs::vfs::Vfs;
+use crate::boot::{BootInfo, BOOT_INFO};
 use core::arch::asm;
 
 extern crate alloc;
@@ -24,56 +23,75 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
         asm!("cli" );
     }
 
-    //fs::dma::init();
+    unsafe { 
+        *(&raw mut BOOT_INFO) = bootinfo_ptr.read();
+    };
+
+    memory::init();
+
+    fs::dma::init();
     std::memory::heap::init_heap(0x30_0000 as *mut u8, 0x10_0000);
 
     println!("[KERNEL] Hello World!");
 
+    interrupts::task::TASK_MANAGER.lock().init();
+
+    // Kernel Task (can use println!)
+    interrupts::task::TASK_MANAGER.lock().add_task(test_task as u64, None);
+    
+    // User Task (MUST be self-contained, no kernel calls)
+    interrupts::task::TASK_MANAGER.lock().add_task(user_task as u64, None);
+
     load_idt();
     //keyboard::init();
 
-    let mut vfs = Vfs::new();
-
-    println!("\nMounting Ext2 (Disk 0xE0) to '/'...");
-    let ext2_fs = FileSystem::mount(0xE0);
-    vfs.mount("/", Box::new(ext2_fs));
-
-    // List Root
-    println!("\n[VFS] Listing '/':");
-    match vfs.list_dir("/") {
-        Ok(files) => {
-            for f in files {
-                println!("  - {}", f);
-            }
-        },
-        Err(e) => println!("Error: {}", e),
+    println!("[KERNEL] Initializing Ext2...");
+    
+    // Mount Ext2 at offset 16384 (where make.bat puts it)
+    // Disk 0
+    match crate::fs::ext2::fs::Ext2::new(0, 16384) {
+        Ok(fs) => {
+            println!("[EXT2] Superblock found!");
+            println!(" - Magic: {:#x}", fs.superblock.magic + 0);
+            println!(" - Inodes Count: {}", fs.superblock.inodes_count + 0);
+            println!(" - Blocks Count: {}", fs.superblock.blocks_count + 0);
+            println!(" - Block Size: 1024 << {} = {}", fs.superblock.log_block_size + 0, 1024 << fs.superblock.log_block_size + 0);
+            println!(" - First Data Block: {}", fs.superblock.first_data_block + 0);
+            println!(" - Mount Count: {}", fs.superblock.mount_count + 0);
+        }
+        Err(e) => println!("[EXT2] Failed to mount Disk 0 @ 16384: {}", e),
     }
 
-    let create_path = "/rtc_test.txt";
-    println!("\n[VFS] Creating '{}'...", create_path);
-    match vfs.create_file(create_path) {
-        Ok(_) => {
-            println!("  Success! File created.");
-            let content = "This file was created with a real timestamp!";
-            let _ = vfs.write_file(create_path, content.as_bytes());
-        },
-        Err(e) => println!("Error: {}", e),
-    }
-
-    let read_path = "/thnx.txt";
-    println!("\n[VFS] Reading '{}'...", read_path);
-    match vfs.read_file(read_path) {
-        Ok(data) => {
-             match alloc::str::from_utf8(&data) {
-                 Ok(s) => println!("  Content:\n\"{}", s),
-                 Err(_) => println!("  (Binary data, {} bytes)", data.len()),
-             }
-        },
-        Err(e) => println!("Error: {}", e),
-    }
+    println!("[KERNEL] Starting Kernel Tasks...");
 
     loop {}
 }
+
+fn test_task() {
+    loop {
+        println!("Task A (Kernel)");
+        for _ in 0..10000000 { unsafe { core::arch::asm!("nop") } }
+    }
+}
+
+fn user_task() {
+    loop {
+        unsafe {
+            // Write 'U' to serial port 0x3F8
+            core::arch::asm!(
+                "mov dx, 0x3F8",
+                "mov al, 0x55", // 'U'
+                "out dx, al",
+                options(nomem, nostack, preserves_flags)
+            );
+
+            for _ in 0..10000000 { 
+                core::arch::asm!("nop");
+            }
+        }
+    }
+}
+
 
 pub fn load_idt() {
     unsafe {
@@ -87,7 +105,7 @@ pub fn load_idt() {
         (*(&raw mut interrupts::idt::IDT)).load();
         (*(&raw mut interrupts::pic::PICS)).init();
 
-        //core::arch::asm!("sti"); // Interrupts disabled for stability during mounting
+        core::arch::asm!("sti"); // Interrupts disabled for stability during mounting
     }
 }
 

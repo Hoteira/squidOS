@@ -91,6 +91,7 @@ impl Pics {
         self.slave.write_data(0xFF);
 
         // Unmask specific interrupts
+        self.master.unmask_irq(0); // Timer
         self.master.unmask_irq(1); // Keyboard
         self.master.unmask_irq(2); // Cascade (Required for Slave PIC)
         

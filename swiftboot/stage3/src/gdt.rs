@@ -58,27 +58,26 @@ impl Gdt {
         }
     }
 
+    pub fn load_tss(&self) {
+        unsafe {
+            asm!("ltr {0:x}", in(reg) 0x38u16, options(nostack, preserves_flags));
+        }
+    }
+
     pub fn write_tss(&mut self) {
         let tss_limit = (size_of::<crate::tss::TaskStateSegment>() - 1) as u64;
-        let tss_limit_low = (tss_limit & 0xFFFF) << 0;
-        let tss_limit_high = ((tss_limit >> 16) & 0xF) << 48;
         let tss_base = addr_of!(crate::tss::BASE_TSS) as u64;
-        let tss_base_low = (tss_base & 0xFFFF) << 16;
-        let tss_base_mid = ((tss_base >> 16) & 0xFF) << 32;
-        let tss_base_high = ((tss_base >> 24) & 0xFF) << 56;
-        let tss_base_upper = (tss_base >> 32) & 0xFFFFFFFF;
-        self.entries[7] = Entry {
-            entry: tss_limit_low
-                | tss_limit_high
-                | tss_base_low
-                | tss_base_mid
-                | tss_base_high
-                | (0x89 << 40)
-                | (0x0 << 52),
-        };
 
-        self.entries[8] = Entry {
-            entry: tss_base_upper,
-        };
+        let low_desc = (tss_limit & 0xFFFF) 
+            | ((tss_base & 0xFFFF) << 16) 
+            | (((tss_base >> 16) & 0xFF) << 32) 
+            | (0x89 << 40) // Present, 64-bit TSS Available (Type 9)
+            | (((tss_limit >> 16) & 0xF) << 48)
+            | (((tss_base >> 24) & 0xFF) << 56);
+
+        let high_desc = tss_base >> 32;
+
+        self.entries[7] = Entry { entry: low_desc };
+        self.entries[8] = Entry { entry: high_desc };
     }
 }

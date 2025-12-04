@@ -54,11 +54,11 @@ pub fn read(lba: u64, disk: u8, target: &mut [u8]) {
         PRDT.transfer_size = 512 * sectors as u16;
         PRDT.flags = 0x8000;
 
-        outb(BMR_COMMAND, 0);
-
         outl(BMR_PRDT, core::ptr::addr_of!(PRDT) as u32);
 
-        outb(ATA_DISK, (disk as u64 | ((lba >> 24) & 0x0F)) as u8);
+        // Bit 4 determines Master (0) vs Slave (1). Base is 0xE0 (LBA mode).
+        let drive_select = 0xE0 | ((disk & 1) << 4);
+        outb(ATA_DISK, (drive_select as u64 | ((lba >> 24) & 0x0F)) as u8);
 
         outb(ATA_SECTOR, sectors as u8);
         outb(ATA_LBA_LOW, lba as u8);
@@ -102,7 +102,8 @@ pub fn write(lba: u64, disk: u8, buffer: &[u8]) {
 
         outl(BMR_PRDT, core::ptr::addr_of!(PRDT) as u32);
 
-        outb(ATA_DISK, (disk as u64 | ((lba >> 24) & 0x0F)) as u8);
+        let drive_select = 0xE0 | ((disk & 1) << 4);
+        outb(ATA_DISK, (drive_select as u64 | ((lba >> 24) & 0x0F)) as u8);
 
         outb(ATA_SECTOR, sectors as u8);
         outb(ATA_LBA_LOW, lba as u8);

@@ -1,4 +1,4 @@
-pub(crate) mod ext2;
-mod disk;
-pub(crate) mod dma;
+pub mod disk;
+pub mod dma;
 pub mod vfs;
+pub mod ext2;

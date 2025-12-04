@@ -1,4 +1,4 @@
-use crate::interrupts::exceptions;
+use crate::interrupts::{exceptions, task};
 use core::arch::asm;
 use core::mem::size_of;
 
@@ -84,7 +84,7 @@ impl Idt {
     }
 
     pub fn hardware_interrupts(&mut self) {
-        self.add(exceptions::TIMER_INT as usize, exceptions::timer_handler as u64);
+        self.add(exceptions::TIMER_INT as usize, task::timer_handler as u64);
         self.add(exceptions::KEYBOARD_INT as usize, exceptions::keyboard_handler as u64);
         self.add(exceptions::MOUSE_INT as usize, exceptions::mouse_handler as u64);
     }
