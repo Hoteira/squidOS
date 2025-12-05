@@ -20,8 +20,8 @@ pub extern "C" fn _start() -> ! {
 
         if bytes_read > 0 {
 
-            //let s = unsafe { core::str::from_utf8_unchecked(&buffer[..bytes_read]) };
-            //print!("{}", s);
+            let s = unsafe { core::str::from_utf8_unchecked(&buffer[..bytes_read]) };
+            print!("{}", s);
 
         } else {
 

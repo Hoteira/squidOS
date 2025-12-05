@@ -43,8 +43,28 @@ pub extern "x86-interrupt" fn double_fault(info: &mut StackFrame, _error_code: u
     loop {}
 }
 
-pub extern "x86-interrupt" fn general_protection_fault(info: &mut StackFrame, _error_code: u64) {
-    serial_print("EXCEPTION: GPF");
+pub extern "x86-interrupt" fn general_protection_fault(info: &mut StackFrame, error_code: u64) {
+    serial_print("=== GENERAL PROTECTION FAULT ===");
+
+    // Decode error code
+    let external = (error_code & 0x1) != 0;
+    let table = (error_code >> 1) & 0x3; // 0=GDT, 1=IDT, 2=LDT, 3=IDT
+    let index = (error_code >> 3) & 0x1FFF;
+
+    unsafe {
+        use core::fmt::Write;
+        let mut writer = crate::debug::SerialDebug::new();
+        let _ = write!(writer, "Error Code: {:#x}\n", error_code);
+        let _ = write!(writer, "  External: {}\n", external);
+        let _ = write!(writer, "  Table: {} (0=GDT, 1=IDT, 2/3=LDT/IDT)\n", table);
+        let _ = write!(writer, "  Index: {:#x}\n", index);
+        let _ = write!(writer, "RIP: {:#x}\n", info.instruction_pointer);
+        let _ = write!(writer, "CS: {:#x}\n", info.code_segment);
+        let _ = write!(writer, "RFLAGS: {:#x}\n", info.cpu_flags);
+        let _ = write!(writer, "RSP: {:#x}\n", info.stack_pointer);
+        let _ = write!(writer, "SS: {:#x}\n", info.stack_segment);
+    }
+
     loop {}
 }
 

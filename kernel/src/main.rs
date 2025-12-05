@@ -30,12 +30,6 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
     memory::init();
 
-    // Initialize Video (Framebuffer)
-    drivers::video::framebuffer::init();
-    
-    // Draw Blue Screen
-    drivers::video::framebuffer::clear_screen(0xFF0000FF); // ARGB (Blue)
-
     fs::dma::init();
     std::memory::heap::init_heap(0x30_0000 as *mut u8, 0x100_0000);
 
@@ -44,6 +38,17 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     interrupts::task::TASK_MANAGER.lock().init();
 
     interrupts::task::TASK_MANAGER.lock().add_task(test_task as u64, None);
+
+    debugln!("[KERNEL] Setting initial TSS for user tasks");
+    let first_user_task = interrupts::task::TASK_MANAGER.lock()
+        .tasks.iter()
+        .find(|t| t.state == interrupts::task::TaskState::Ready && t.kernel_stack != 0)
+        .map(|t| t.kernel_stack);
+
+    if let Some(kstack) = first_user_task {
+        tss::set_tss(kstack);
+        debugln!("[KERNEL] TSS RSP0 set to {:#x}", kstack);
+    }
     
     debugln!("[KERNEL] Initializing Ext2...");
 

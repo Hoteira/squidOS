@@ -10,7 +10,7 @@ pub const SYS_YIELD: u64 = 2;
 pub const SYS_EXIT: u64 = 60;
 
 #[unsafe(naked)]
-pub extern "x86-interrupt" fn int80_handler(_stack_frame: *mut crate::interrupts::exceptions::StackFrame) {
+pub extern "C" fn int80_handler(_stack_frame: *mut crate::interrupts::exceptions::StackFrame) {
     unsafe {
         naked_asm!(
 
@@ -87,6 +87,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             }
             context.rax = bytes_read as u64;
         }
+
         SYS_PRINT => {
             let ptr = context.rdi as *const u8;
             let len = context.rsi as usize;
