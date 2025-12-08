@@ -13,7 +13,7 @@ const PD3_ADDR: u64 = 0x25000;
 
 pub static mut PML4: PageTable = PageTable { entries: [0; 512] };
 
-pub(crate) fn setup_paging() {
+pub(crate) fn setup_paging(fb_addr: u64, fb_size: u64) {
     unsafe {
         let pml4 = PML4_ADDR as *mut PageTable;
         let pdpt = PDPT_ADDR as *mut PageTable;
@@ -25,9 +25,9 @@ pub(crate) fn setup_paging() {
         core::ptr::write_bytes(pml4, 0, 1);
         core::ptr::write_bytes(pdpt, 0, 1);
         core::ptr::write_bytes(pd0, 0, 1);
-        core::ptr::write_bytes(pd0, 1, 1);
-        core::ptr::write_bytes(pd0, 2, 1);
-        core::ptr::write_bytes(pd0, 3, 1);
+        core::ptr::write_bytes(pd1, 0, 1);
+        core::ptr::write_bytes(pd2, 0, 1);
+        core::ptr::write_bytes(pd3, 0, 1);
 
         // PML4[0] -> PDPT
         (*pml4).entries[0] = PDPT_ADDR | 0b111; // Present + Writable + User
@@ -38,23 +38,28 @@ pub(crate) fn setup_paging() {
         (*pdpt).entries[2] = PD2_ADDR | 0b111;
         (*pdpt).entries[3] = PD3_ADDR | 0b111;
 
+        // Helper to fill PD with 2MB pages, setting PAT if overlapping FB
+        let fill_pd = |pd: *mut PageTable, start_phys: u64| {
+            for i in 0..512 {
+                let phys = start_phys + (i as u64 * 0x200000);
+                let page_end = phys + 0x200000;
+                let fb_end = fb_addr + fb_size;
+                
+                let mut flags = 0b10000111; // Huge + User + RW + Present
+                
+                if (phys < fb_end) && (page_end > fb_addr) {
+                    // Overlap! Set PAT bit (Bit 12)
+                    flags |= 0x1000;
+                }
+                
+                (*pd).entries[i] = phys | flags;
+            }
+        };
 
-        // Identity map first 4GB using 2MB pages (so that it includes the framebuffer)
-        for i in 0..512 {
-            (*pd0).entries[i] = (i as u64 * 0x20_0000) | 0b10000111; // PS + Present + Writable + User
-        }
-
-        for i in 0..512 {
-            (*pd1).entries[i] = (0x4000_0000 + i as u64 * 0x20_0000) | 0b10000111;
-        }
-
-        for i in 0..512 {
-            (*pd2).entries[i] = (0x8000_0000 + i as u64 * 0x20_0000) | 0b10000111;
-        }
-
-        for i in 0..512 {
-            (*pd3).entries[i] = (0xC000_0000 + i as u64 * 0x20_0000) | 0b10000111;
-        }
+        fill_pd(pd0, 0x0000_0000);
+        fill_pd(pd1, 0x4000_0000);
+        fill_pd(pd2, 0x8000_0000);
+        fill_pd(pd3, 0xC000_0000);
 
         PML4 = *pml4;
     }

@@ -44,8 +44,8 @@ pub fn init_ists() {
         let tss_desc_low_ptr = (gdt_base + (tr_index as u64 * 8)) as *mut u64;
         let tss_desc_high_ptr = (gdt_base + (tr_index as u64 * 8) + 8) as *mut u64;
         
-        let low = *tss_desc_low_ptr;
-        let high = *tss_desc_high_ptr;
+        let low = core::ptr::read_unaligned(tss_desc_low_ptr);
+        let high = core::ptr::read_unaligned(tss_desc_high_ptr);
         
         let mut base = 0u64;
         base |= (low >> 16) & 0xFFFF;
@@ -86,8 +86,8 @@ pub fn set_tss(kernel_stack: u64) {
         let tss_desc_low_ptr = (gdt_base + (tr_index as u64 * 8)) as *mut u64;
         let tss_desc_high_ptr = (gdt_base + (tr_index as u64 * 8) + 8) as *mut u64;
         
-        let low = *tss_desc_low_ptr;
-        let high = *tss_desc_high_ptr;
+        let low = core::ptr::read_unaligned(tss_desc_low_ptr);
+        let high = core::ptr::read_unaligned(tss_desc_high_ptr);
         
         let mut base = 0u64;
         base |= (low >> 16) & 0xFFFF;

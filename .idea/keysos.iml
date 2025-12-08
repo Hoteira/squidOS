@@ -6,6 +6,12 @@
       <sourceFolder url="file://$MODULE_DIR$/std/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/elfic/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/userland/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/swiftboot/bootloader/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/swiftboot/cargo-compile/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/swiftboot/stage2/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/swiftboot/stage3/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/swiftboot/stage4/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/swiftboot/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

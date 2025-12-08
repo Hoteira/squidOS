@@ -72,7 +72,21 @@ pub extern "C" fn _start() -> ! {
 
         disk::read(NEXT_STAGE_LBA, 1024, NEXT_STAGE_RAM as *mut u8);
 
-        paging::setup_paging();
+        unsafe {
+            let fb = (*bootinfo).mode.framebuffer;
+            let w = (*bootinfo).mode.width as u64;
+            let h = (*bootinfo).mode.height as u64;
+            let p = (*bootinfo).mode.pitch as u64;
+            let size = h * p;
+            
+            debug("[+] FB Addr: ");
+            crate::debug::print_hex(fb as u64);
+            debug("\n[+] FB Size: ");
+            crate::debug::print_hex(size);
+            debug("\n");
+            
+            paging::setup_paging(fb as u64, size);
+        }
 
         unsafe {
 

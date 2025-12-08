@@ -2,11 +2,11 @@
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct BootInfo {
-    mmap: MemoryMap,
+    pub mmap: MemoryMap,
     rsdp: Rsdp,
     pub tss: u16,
     vbe: VbeInfoBlock,
-    mode: VbeModeInfoBlock,
+    pub mode: VbeModeInfoBlock,
     pub pml4: u64,
     pub kernel_stack: u64,
 }
@@ -79,9 +79,9 @@ pub struct VbeModeInfoBlock {
     segment_a: u16,
     segment_b: u16,
     win_func_ptr: u32,
-    pitch: u16,
-    width: u16,
-    height: u16,
+    pub(crate) pitch: u16,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
     w_char: u8,
     y_char: u8,
     planes: u8,
@@ -100,7 +100,7 @@ pub struct VbeModeInfoBlock {
     reserved_mask_size: u8,
     reserved_field_position: u8,
     direct_color_mode_info: u8,
-    framebuffer: u32,
+    pub(crate) framebuffer: u32,
     reserved1: u32,
     reserved2: u16,
     lin_bytes_per_scan_line: u16,

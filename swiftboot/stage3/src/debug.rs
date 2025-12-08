@@ -1,5 +1,28 @@
 use core::arch::asm;
 
+pub fn print_hex(mut num: u64) {
+    debug("0x");
+    if num == 0 {
+        debug("0");
+        return;
+    }
+    
+    let mut buffer = [0u8; 16]; // max 16 hex digits
+    let mut idx = 0;
+    
+    while num > 0 {
+        let digit = (num % 16) as u8;
+        buffer[idx] = if digit < 10 { b'0' + digit } else { b'a' + (digit - 10) };
+        num /= 16;
+        idx += 1;
+    }
+    
+    while idx > 0 {
+        idx -= 1;
+        write_byte(buffer[idx]);
+    }
+}
+
 pub fn write_byte(byte: u8) {
     match byte {
         b'\n' => outb(0x3F8, '\n' as u8),

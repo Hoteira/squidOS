@@ -19,11 +19,12 @@ use crate::fs::vfs::FileSystem;
 use crate::fs::ext2::fs::Ext2; // Added Ext2 for font loading
 use core::arch::asm;
 
-// MSRs for SYSCALL/SYSRET
+// MSRs for SYSCALL/SYSRET and PAT
 const EFER_MSR: u32 = 0xC0000080; // Extended Feature Enable Register
 const STAR_MSR: u32 = 0xC0000081; // SYSCALL Target Address Register
 const LSTAR_MSR: u32 = 0xC0000082; // Long Mode SYSCALL Target Address Register
 const SFMASK_MSR: u32 = 0xC0000084; // SYSCALL Flag Mask
+const PAT_MSR: u32 = 0x277;       // Page Attribute Table MSR
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".start")]
@@ -36,7 +37,11 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
         *(&raw mut BOOT_INFO) = bootinfo_ptr.read();
     };
 
+    // Initialize Memory Subsystem
     memory::init();
+    
+    // Configure PAT for Write-Combining on PAT4
+    init_pat();
 
     fs::dma::init();
     // Move heap to 48MB to avoid collision with PMM Bitmap (10MB-43MB)
@@ -47,8 +52,6 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     tss::init_ists();
 
     interrupts::task::TASK_MANAGER.lock().init();
-
-    //interrupts::task::TASK_MANAGER.lock().add_task(test_task as u64, None);
 
     unsafe { (*(&raw mut composer::DISPLAY_SERVER)).init(); }
 
@@ -172,6 +175,28 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     debugln!("[KERNEL] Interrupts enabled.");
 
     loop {}
+}
+
+fn init_pat() {
+    unsafe {
+        let mut pat = rdmsr(PAT_MSR);
+        debugln!("[CPU] Original PAT: {:#x}", pat);
+        
+        // PAT Layout: 8 entries of 1 byte each (bits 0-2 are memory type, others reserved/0).
+        // We want Index 4 (Bits 32-39) to be Write-Combining (0x01).
+        // Clear index 4
+        pat &= !(0xFFu64 << 32);
+        // Set index 4 to 0x01 (WC)
+        pat |= (0x01u64 << 32);
+        
+        wrmsr(PAT_MSR, pat);
+        debugln!("[CPU] New PAT: {:#x}", pat);
+        
+        // Flush TLB to ensure new attributes take effect
+        let cr3: u64;
+        asm!("mov {}, cr3", out(reg) cr3);
+        asm!("mov cr3, {}", in(reg) cr3);
+    }
 }
 
 /// Reads an MSR.
