@@ -6,36 +6,13 @@ pub fn init() {
     unsafe {
         let pml4_phys = (*(&raw const crate::boot::BOOT_INFO)).pml4;
         debugln!("[VMM] PML4 at {:#x}", pml4_phys);
-        
-        let pml4 = paging::active_level_4_table();
-        
-        // Bootloader has already mapped 0-4GB (Entries 0-3) with User+RW.
-        // We only need to extend the identity map to cover more RAM if needed (e.g. up to 32GB).
-        
-        let pdpt = paging::get_table_from_phys(pml4.entries[0] & 0x000FFFFFFFFFF000).unwrap();
-        
-        // Map 4GiB-32GiB using 2MB Huge Pages (L2)
-        // Start from index 4 (4GB), preserving bootloader's 0-3.
-        for i in 4..32 {
-            let pd_frame = pmm::allocate_frame().expect("VMM: OOM for Identity PD");
-            let pd_ptr = pd_frame as *mut paging::PageTable;
-            (*pd_ptr).zero();
-            
-            for j in 0..512 {
-                let phys_addr = (i as u64 * 1024 * 1024 * 1024) + (j as u64 * 2 * 1024 * 1024);
-                (*pd_ptr).entries[j] = phys_addr | paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER | paging::PAGE_HUGE;
-            }
-            
-            pdpt.entries[i] = pd_frame | paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER;
-        }
-        
-        debugln!("[VMM] Extended Identity Map (4-32GiB). 0-4GiB preserved from Bootloader.");
+        debugln!("[VMM] Relying on Bootloader Identity Map (0-4GiB).");
     }
 }
 
 pub fn map_page(virt: u64, phys: u64, flags: u64, target_pml4_phys: Option<u64>) {
     // ... (Keep existing map_page implementation, it handles huge page collisions now)
-    debugln!("[VMM] map_page: Mapping virt {:#x} to phys {:#x} with flags {:#b} for PML4 {:#x?}", virt, phys, flags, target_pml4_phys);
+    // debugln!("[VMM] map_page: Mapping virt {:#x} to phys {:#x} with flags {:#b} for PML4 {:#x?}", virt, phys, flags, target_pml4_phys);
     
     // Safety Check: Prevent User pages in Kernel Space
     if (flags & paging::PAGE_USER) != 0 {
@@ -69,11 +46,7 @@ pub fn map_page(virt: u64, phys: u64, flags: u64, target_pml4_phys: Option<u64>)
             let frame = pmm::allocate_frame().expect("VMM: OOM for PDPT");
             // debugln!("[VMM] map_page: Allocated frame {:#x} for PDPT", frame);
             
-            // Ensure this frame is mapped in the kernel so we can write to it
-            // Recursive call might hit huge page collision check? 
-            // If we identity map, it might hit the 1GB/2MB pages we just set up.
-            // But that's fine, map_page handles collisions now.
-            map_page(frame, frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
+            // Recursive map removed: Frame is already identity mapped by vmm::init (0-32GB)
             
             // Ensure intermediate tables allow User access if we want user pages below them
             p3_entry = frame | paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER;
@@ -110,7 +83,7 @@ pub fn map_page(virt: u64, phys: u64, flags: u64, target_pml4_phys: Option<u64>)
             let frame = pmm::allocate_frame().expect("VMM: OOM for PD");
             // debugln!("[VMM] map_page: Allocated frame {:#x} for PD", frame);
             
-            map_page(frame, frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
+            // Recursive map removed
 
             p2_entry = frame | paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER;
             p3.entries[p3_idx as usize] = p2_entry;
@@ -145,7 +118,7 @@ pub fn map_page(virt: u64, phys: u64, flags: u64, target_pml4_phys: Option<u64>)
             let frame = pmm::allocate_frame().expect("VMM: OOM for PT");
             // debugln!("[VMM] map_page: Allocated frame {:#x} for PT", frame);
             
-            map_page(frame, frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
+            // Recursive map removed
 
             p1_entry = frame | paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER;
             p2.entries[p2_idx as usize] = p1_entry;
@@ -169,31 +142,11 @@ pub fn map_page(virt: u64, phys: u64, flags: u64, target_pml4_phys: Option<u64>)
             asm!("invlpg [{}]", in(reg) virt);
             // debugln!("[VMM] map_page: TLB invalidated.");
         } else {
-            // debugln!("[VMM] map_page: TLB not invalidated, as mapping a non-active PML4.");
         }
     }
-    // debugln!("[VMM] map_page: Mapping completed successfully.");
 }
 
 pub unsafe fn new_user_pml4() -> u64 {
-    // Return the Boot PML4 directly.
-    // This effectively shares the kernel's address space with the user.
-    // Since we mapped 0-32GiB as User+RW in init(), user tasks can run freely.
-    (*(&raw const crate::boot::BOOT_INFO)).pml4
-}
 
-pub fn map_user_stack(phys_frame: u64, target_pml4_phys: u64) -> u64 {
-    // Pick a high virtual address for the user stack.
-    // Let's use 0x0000_7000_0000_0000 + phys_frame (just to keep it unique per frame for now)
-    // A real OS would use a VMA allocator.
-    let virt_addr = 0x0000_7000_0000_0000 + phys_frame; 
-    
-    map_page(
-        virt_addr, 
-        phys_frame, 
-        paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER,
-        Some(target_pml4_phys) // Pass the target PML4
-    );
-    
-    virt_addr
+    (*(&raw const crate::boot::BOOT_INFO)).pml4
 }

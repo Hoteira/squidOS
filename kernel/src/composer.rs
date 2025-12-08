@@ -131,25 +131,6 @@ impl EventQueue {
     }
 }
 
-const O: u32 = 0x0000_0000;
-const B: u32 = 0x0000_00FF;
-const T: u32 = 0xFFFF_FFFF;
-
-const MOUSE_CURSOR: [u32; 96] = [
-    B, O, O, O, O, O, O, O,
-    B, B, O, O, O, O, O, O,
-    B, T, B, O, O, O, O, O,
-    B, T, T, B, O, O, O, O,
-    B, T, T, T, B, O, O, O,
-    B, T, T, T, T, B, O, O,
-    B, T, T, T, T, T, B, O,
-    B, T, T, T, T, T, T, B,
-    B, T, T, T, B, B, B, B,
-    B, T, B, B, T, B, O, O,
-    B, B, O, O, B, T, B, O,
-    B, O, O, O, O, B, B, O,
-];
-
 impl DisplayServer {
     pub fn init(&mut self) {
         let boot_info = unsafe { crate::boot::BOOT_INFO };
@@ -250,15 +231,34 @@ impl DisplayServer {
                         let dst_offset = (y as usize + row) * dst_pitch + (x as usize + col) * 4;
 
                         let src_a = *src_ptr.add(src_offset + 3);
+                        
                         if src_a == 0 {
-                            continue;
-                        }
+                            continue; // Transparent
+                        } else if src_a == 255 {
+                            // Opaque
+                            core::ptr::copy(
+                                src_ptr.add(src_offset),
+                                dst_ptr.add(dst_offset),
+                                4,
+                            );
+                        } else {
+                            // Blend
+                            let alpha = src_a as u32;
+                            let inv_alpha = 255 - alpha;
 
-                        core::ptr::copy(
-                            src_ptr.add(src_offset),
-                            dst_ptr.add(dst_offset),
-                            4,
-                        );
+                            let src_r = *src_ptr.add(src_offset) as u32;
+                            let src_g = *src_ptr.add(src_offset + 1) as u32;
+                            let src_b = *src_ptr.add(src_offset + 2) as u32;
+
+                            let dst_r = *dst_ptr.add(dst_offset) as u32;
+                            let dst_g = *dst_ptr.add(dst_offset + 1) as u32;
+                            let dst_b = *dst_ptr.add(dst_offset + 2) as u32;
+
+                            *dst_ptr.add(dst_offset) = ((src_r * alpha + dst_r * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 1) = ((src_g * alpha + dst_g * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 2) = ((src_b * alpha + dst_b * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 3) = 255;
+                        }
                     }
                 }
             } else {
@@ -268,13 +268,30 @@ impl DisplayServer {
                         let dst_offset = (y as usize + row) * dst_pitch + (x as usize + col) * 3;
 
                         let src_a = *src_ptr.add(src_offset + 3);
+                        
                         if src_a == 0 {
                             continue;
-                        }
+                        } else if src_a == 255 {
+                            *dst_ptr.add(dst_offset) = *src_ptr.add(src_offset);
+                            *dst_ptr.add(dst_offset + 1) = *src_ptr.add(src_offset + 1);
+                            *dst_ptr.add(dst_offset + 2) = *src_ptr.add(src_offset + 2);
+                        } else {
+                            // Blend
+                            let alpha = src_a as u32;
+                            let inv_alpha = 255 - alpha;
 
-                        *dst_ptr.add(dst_offset) = *src_ptr.add(src_offset);
-                        *dst_ptr.add(dst_offset + 1) = *src_ptr.add(src_offset + 1);
-                        *dst_ptr.add(dst_offset + 2) = *src_ptr.add(src_offset + 2);
+                            let src_r = *src_ptr.add(src_offset) as u32;
+                            let src_g = *src_ptr.add(src_offset + 1) as u32;
+                            let src_b = *src_ptr.add(src_offset + 2) as u32;
+
+                            let dst_r = *dst_ptr.add(dst_offset) as u32;
+                            let dst_g = *dst_ptr.add(dst_offset + 1) as u32;
+                            let dst_b = *dst_ptr.add(dst_offset + 2) as u32;
+
+                            *dst_ptr.add(dst_offset) = ((src_r * alpha + dst_r * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 1) = ((src_g * alpha + dst_g * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 2) = ((src_b * alpha + dst_b * inv_alpha) / 255) as u8;
+                        }
                     }
                 }
             }
@@ -319,44 +336,57 @@ impl DisplayServer {
                     let src_a = *src_ptr.add(src_offset + 3);
 
                     if dst_bpp == 32 {
+                        // 32-bit destination with alpha blending
                         if src_a == 255 {
+                            // Fully opaque: direct copy (optimization)
                             *dst_ptr.add(dst_offset) = src_r;
                             *dst_ptr.add(dst_offset + 1) = src_g;
                             *dst_ptr.add(dst_offset + 2) = src_b;
                             *dst_ptr.add(dst_offset + 3) = src_a;
                         } else if src_a == 0 {
+                            // Fully transparent: skip (optimization)
                             continue;
                         } else {
-                            let alpha = src_a as u16;
+                            // Alpha blending required
+                            let alpha = src_a as u32;
                             let inv_alpha = 255 - alpha;
 
-                            let dst_r = *dst_ptr.add(dst_offset) as u16;
-                            let dst_g = *dst_ptr.add(dst_offset + 1) as u16;
-                            let dst_b = *dst_ptr.add(dst_offset + 2) as u16;
+                            // Read destination pixel
+                            let dst_r = *dst_ptr.add(dst_offset) as u32;
+                            let dst_g = *dst_ptr.add(dst_offset + 1) as u32;
+                            let dst_b = *dst_ptr.add(dst_offset + 2) as u32;
 
-                            *dst_ptr.add(dst_offset) = ((src_r as u16 * alpha + dst_r * inv_alpha) / 255) as u8;
-                            *dst_ptr.add(dst_offset + 1) = ((src_g as u16 * alpha + dst_g * inv_alpha) / 255) as u8;
-                            *dst_ptr.add(dst_offset + 2) = ((src_b as u16 * alpha + dst_b * inv_alpha) / 255) as u8;
+                            // Blend and write back
+                            *dst_ptr.add(dst_offset) = ((src_r as u32 * alpha + dst_r * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 1) = ((src_g as u32 * alpha + dst_g * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 2) = ((src_b as u32 * alpha + dst_b * inv_alpha) / 255) as u8;
+                            // Keep destination alpha or set to opaque
                             *dst_ptr.add(dst_offset + 3) = 255;
                         }
                     } else {
+                        // 24-bit destination: convert RGBA to RGB
                         if src_a == 0 {
+                            // Fully transparent: skip
                             continue;
                         } else if src_a == 255 {
+                            // Fully opaque: direct copy RGB channels
                             *dst_ptr.add(dst_offset) = src_r;
                             *dst_ptr.add(dst_offset + 1) = src_g;
                             *dst_ptr.add(dst_offset + 2) = src_b;
                         } else {
-                            let alpha = src_a as u16;
+                            // Alpha blending with 24-bit destination
+                            let alpha = src_a as u32;
                             let inv_alpha = 255 - alpha;
 
-                            let dst_r = *dst_ptr.add(dst_offset) as u16;
-                            let dst_g = *dst_ptr.add(dst_offset + 1) as u16;
-                            let dst_b = *dst_ptr.add(dst_offset + 2) as u16;
+                            // Read destination RGB
+                            let dst_r = *dst_ptr.add(dst_offset) as u32;
+                            let dst_g = *dst_ptr.add(dst_offset + 1) as u32;
+                            let dst_b = *dst_ptr.add(dst_offset + 2) as u32;
 
-                            *dst_ptr.add(dst_offset) = ((src_r as u16 * alpha + dst_r * inv_alpha) / 255) as u8;
-                            *dst_ptr.add(dst_offset + 1) = ((src_g as u16 * alpha + dst_g * inv_alpha) / 255) as u8;
-                            *dst_ptr.add(dst_offset + 2) = ((src_b as u16 * alpha + dst_b * inv_alpha) / 255) as u8;
+                            // Blend and write back RGB only
+                            *dst_ptr.add(dst_offset) = ((src_r as u32 * alpha + dst_r * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 1) = ((src_g as u32 * alpha + dst_g * inv_alpha) / 255) as u8;
+                            *dst_ptr.add(dst_offset + 2) = ((src_b as u32 * alpha + dst_b * inv_alpha) / 255) as u8;
                         }
                     }
                 }
@@ -390,40 +420,101 @@ impl DisplayServer {
     }
 
     pub fn draw_mouse(&self, x: u16, y: u16) {
+        use crate::drivers::periferics::mouse::{CURSOR_BUFFER, CURSOR_WIDTH, CURSOR_HEIGHT};
 
-        for i in 0..12 {
-            for j in 0..8 {
-                let color = MOUSE_CURSOR[(i * 8 + j) as usize];
-                if color != O {
-                    self.write_pixel(
-                        y.wrapping_add(i) as u32,
-                        x.wrapping_add(j) as u32,
-                        Color::from_u32(color),
-                    );
+        // Fallback for non-32bpp or weird pitch
+        if self.depth != 32 {
+             unsafe {
+                for i in 0..CURSOR_HEIGHT {
+                    for j in 0..CURSOR_WIDTH {
+                        let color = CURSOR_BUFFER[i * CURSOR_WIDTH + j];
+                        if color != 0 { 
+                            self.write_pixel(y.wrapping_add(i as u16) as u32, x.wrapping_add(j as u16) as u32, Color::from_u32(color));
+                        }
+                    }
                 }
+            }
+            return;
+        }
+
+        // Optimized 32bpp path
+        let mut temp_buf: [u32; 1024] = [0; 1024];
+        let pitch_bytes = self.pitch as usize;
+        let db_ptr = self.double_buffer as *const u8;
+        let fb_ptr = self.framebuffer as *mut u8;
+        let screen_w = self.width as usize;
+        let screen_h = self.height as usize;
+        let mx = x as usize;
+        let my = y as usize;
+
+        unsafe {
+            for row in 0..CURSOR_HEIGHT {
+                let screen_y = my + row;
+                if screen_y >= screen_h { break; }
+                
+                let row_byte_offset = screen_y * pitch_bytes;
+                
+                for col in 0..CURSOR_WIDTH {
+                    let screen_x = mx + col;
+                    if screen_x >= screen_w { break; }
+                    
+                    let pixel_offset = row_byte_offset + screen_x * 4;
+                    
+                    // Read background (unaligned read safe for u32? usually yes on x86, but let's use copy)
+                    // Actually, double buffer is page aligned. offset is 4*x. It is aligned.
+                    let bg_color = *(db_ptr.add(pixel_offset) as *const u32);
+                    
+                    let cursor_color = CURSOR_BUFFER[row * CURSOR_WIDTH + col];
+                    
+                    if cursor_color != 0 {
+                        temp_buf[row * CURSOR_WIDTH + col] = cursor_color;
+                    } else {
+                        temp_buf[row * CURSOR_WIDTH + col] = bg_color;
+                    }
+                }
+            }
+
+            for row in 0..CURSOR_HEIGHT {
+                let screen_y = my + row;
+                if screen_y >= screen_h { break; }
+                
+                let fb_offset = screen_y * pitch_bytes + mx * 4;
+                
+                let copy_w = if mx + CURSOR_WIDTH > screen_w {
+                    screen_w - mx
+                } else {
+                    CURSOR_WIDTH
+                };
+
+                core::ptr::copy_nonoverlapping(
+                    temp_buf.as_ptr().add(row * CURSOR_WIDTH) as *const u8,
+                    fb_ptr.add(fb_offset),
+                    copy_w * 4
+                );
             }
         }
     }
 }
 
 pub static mut LAST_INPUT: u8 = 0;
-pub static mut DRAGS: u8 = 0;
-pub static mut DRAG: bool = false;
-pub static mut DRAGGING_WINDOW: AtomicU16 = AtomicU16::new(0);
-pub static mut RESIZING_WINDOW: AtomicU16 = AtomicU16::new(0);
-
-pub static mut W_WIDTH: usize = 0;
-pub static mut W_HEIGHT: usize = 0;
 
 impl Mouse {
     pub fn cursor(&mut self, data: [u8; 4]) {
-        unsafe { (*(&raw mut DISPLAY_SERVER)).copy_to_fb(self.x as u32, self.y as u32, 8, 12) };
+        unsafe { (*(&raw mut DISPLAY_SERVER)).copy_to_fb(self.x as u32, self.y as u32, 32, 32) };
 
-        let x_vec = (data[1] as i8) as i16;
-        let y_vec = (data[2] as i8) as i16;
+        let mut x_rel = data[1] as i16;
+        let mut y_rel = data[2] as i16;
 
-        self.x = self.clamp_mx(x_vec);
-        self.y = self.clamp_my(-y_vec);
+        // Parse Sign Bits from Byte 0
+        if (data[0] & 0x10) != 0 { // X Sign
+            x_rel |= 0xFF00u16 as i16; 
+        }
+        if (data[0] & 0x20) != 0 { // Y Sign
+            y_rel |= 0xFF00u16 as i16;
+        }
+
+        self.x = self.clamp_mx(x_rel);
+        self.y = self.clamp_my(-y_rel);
 
         self.left = (data[0] & 0b00000001) != 0;
         self.right = (data[0] & 0b00000010) != 0;
@@ -434,6 +525,53 @@ impl Mouse {
         }
 
         unsafe { (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y) };
+
+        let scroll_val = data[3] as i8;
+
+        if self.left {
+             let w = unsafe { (*(&raw mut COMPOSER)).find_window(self.x as usize, self.y as usize) };
+             if let Some(ws) = w {
+                 let w_type = ws.w_type;
+                 if w_type == Items::Window && ws.z != 0 {
+                     // Bring to front logic
+                     let id = ws.id;
+                     unsafe {
+                        for i in (*(&raw mut COMPOSER)).windows.iter_mut() {
+                            if i.id != id {
+                                i.z = i.z.wrapping_add(1);
+                            } else {
+                                i.z = 0;
+                            }
+                        }
+                        (*(&raw mut COMPOSER)).windows.sort_by_key(|w| w.z);
+                        (*(&raw mut COMPOSER)).copy_window(id);
+                        
+                        (*(&raw mut DISPLAY_SERVER)).copy_to_fb(
+                            ws.x as u32,
+                            ws.y as u32,
+                            ws.width as u32,
+                            ws.height as u32,
+                        );
+                     }
+                 }
+                 
+                 // Send event
+                 if ws.event_handler != 0 {
+                     let xc = ws.x;
+                     let yc = ws.y;
+                     let id = ws.id;
+                     unsafe {
+                        (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(Event::Mouse(MouseEvent {
+                            wid: id as u32,
+                            x: self.x as usize - xc,
+                            y: self.y as usize - yc,
+                            buttons: [self.left, self.center, self.right],
+                            scroll: scroll_val,
+                        }));
+                     }
+                 }
+             }
+        }
     }
 
     fn clamp_mx(&self, n: i16) -> u16 {
@@ -449,24 +587,7 @@ impl Mouse {
         }
     }
 
-    pub fn draw_square_outline(&self, x: u16, y: u16, width: u16, height: u16, color: Color) {
-        let max_x = x + width - 1;
-        let max_y = y + height - 1;
-
-        unsafe {
-            for i in x..=max_x {
-                (*(&raw mut DISPLAY_SERVER)).write_pixel(i as u32, y as u32, color);
-                (*(&raw mut DISPLAY_SERVER)).write_pixel(i as u32, max_y as u32, color);
-            }
-
-            for i in y..=max_y {
-                (*(&raw mut DISPLAY_SERVER)).write_pixel(x as u32, i as u32, color);
-                (*(&raw mut DISPLAY_SERVER)).write_pixel(max_x as u32, i as u32, color);
-            }
-        }
-    }
-
-    pub fn clamp_my(&self, n: i16) -> u16 {
+    fn clamp_my(&self, n: i16) -> u16 {
         let my_0 = self.y as i16;
         let sy = unsafe { (*(&raw mut DISPLAY_SERVER)).height } as u16;
 
@@ -647,12 +768,6 @@ impl Composer {
         }
 
         self.windows.sort_by_key(|w| w.z);
-        unsafe {
-            (*(&raw mut DRAGGING_WINDOW)).store(0, Ordering::Relaxed);
-            (*(&raw mut RESIZING_WINDOW)).store(0, Ordering::Relaxed);
-            W_WIDTH = 0;
-            W_HEIGHT = 0;
-        }
 
         w.id
     }
@@ -706,17 +821,5 @@ impl Composer {
 
             (*(&raw mut DISPLAY_SERVER)).copy();
         }
-    }
-}
-
-fn cap(n: usize, value: usize) -> usize {
-    if n > value { value } else { n }
-}
-
-pub fn add_delta(n: u16, m: i16) -> u16 {
-    if (n as i16 + m) < 0 {
-        0
-    } else {
-        (n as i16 + m) as u16
     }
 }

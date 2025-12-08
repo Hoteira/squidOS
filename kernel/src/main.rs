@@ -48,13 +48,11 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
     interrupts::task::TASK_MANAGER.lock().init();
 
-    interrupts::task::TASK_MANAGER.lock().add_task(test_task as u64, None);
+    //interrupts::task::TASK_MANAGER.lock().add_task(test_task as u64, None);
 
-        unsafe { (*(&raw mut composer::DISPLAY_SERVER)).init(); }
+    unsafe { (*(&raw mut composer::DISPLAY_SERVER)).init(); }
 
-    
-
-        debugln!("[KERNEL] Setting initial TSS for user tasks");
+    debugln!("[KERNEL] Setting initial TSS for user tasks");
 
         let first_user_task = interrupts::task::TASK_MANAGER.lock()
 
@@ -160,24 +158,20 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
         debugln!("[KERNEL] Starting Kernel Tasks...");
 
-        load_idt();
+    load_idt();
+    debugln!("[KERNEL] IDT loaded.");
 
-        debugln!("[KERNEL] IDT loaded, interrupts enabled.");
+    init_syscall_msrs(); // Initialize SYSCALL MSRs
+    debugln!("[KERNEL] SYSCALL MSRs configured.");
 
-        init_syscall_msrs(); // Initialize SYSCALL MSRs
+    drivers::periferics::mouse::init_mouse();
+    debugln!("[KERNEL] Mouse Initialized.");
 
-        debugln!("[KERNEL] SYSCALL MSRs configured.");
+    // Enable interrupts only AFTER all drivers are initialized
+    unsafe { asm!("sti"); }
+    debugln!("[KERNEL] Interrupts enabled.");
 
-    
-
-        loop {}
-}
-
-fn test_task() {
-    loop {
-        debugln!(".");
-        for _ in 0..10000000 { unsafe { core::arch::asm!("nop") } }
-    }
+    loop {}
 }
 
 /// Reads an MSR.
@@ -258,8 +252,6 @@ pub fn load_idt() {
 
         (*(&raw mut interrupts::idt::IDT)).load();
         (*(&raw mut interrupts::pic::PICS)).init();
-
-        core::arch::asm!("sti"); // Interrupts disabled for stability during mounting
     }
 }
 

@@ -121,29 +121,17 @@ pub fn load_elf(data: &[u8], target_pml4_phys: u64) -> Result<u64, alloc::string
 
                 if virt < 0x1_0000_0000 {
                     // Identity Mapped Region (0-4GiB)
-                    // We don't allocate a new frame, we use the one corresponding to the virtual address.
-                    // But we must mark it as used in PMM so we don't double-alloc later.
+                    // Use existing physical frame. Mark as used in PMM just for accounting.
                     let phys = virt;
-                    if pmm::reserve_frame(phys) {
-                        // Success
-                        frame = phys;
-                    } else {
-                        // Already used. 
-                        frame = phys;
+                    if !pmm::reserve_frame(phys) {
+                        // Already used. Just continue.
                     }
-                    
-                    // We rely on the global identity map (0-32GB) established in vmm::init
-                    // which sets User+RW flags. No need to remap.
+                    frame = phys;
+                    // NO MAP_PAGE CALL. Trust the bootloader.
 
                 } else {
-                    // High Memory (> 4GB)
-                    frame = pmm::allocate_frame().expect("OOM loading ELF");
-                    
-                    // Map to User Space
-                    vmm::map_page(virt, frame, flags, Some(target_pml4_phys));
-                    
-                    // Map to Kernel Space (Identity) for access
-                    vmm::map_page(frame, frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
+                    // High Memory (> 4GB) - Not supported in "Raw RAM" model without paging
+                    panic!("ELF Segment at {:#x} exceeds 4GB Identity Map!", virt);
                 }
                 
                 unsafe {
@@ -161,29 +149,12 @@ pub fn load_elf(data: &[u8], target_pml4_phys: u64) -> Result<u64, alloc::string
                 let mut current_virt = virt_start;
                 
                 while remaining > 0 {
-                    // Calculate physical address
-                    let phys_addr = if current_virt < 0x1_0000_0000 {
-                        // Identity Mapped Region (0-4GiB)
-                        // We know phys == virt because we set it up that way in new_user_pml4
-                        current_virt
-                    } else {
-                        // High Memory
-                        unsafe { virt_to_phys(target_pml4_phys, current_virt)
-                            .expect("Translation failed during load") }
-                    };
+                    // Calculate physical address - Identity Map means phys = virt
+                    let phys_addr = current_virt;
 
                     let page_offset = (current_virt % paging::PAGE_SIZE) as usize;
                     let to_copy = core::cmp::min(remaining, (paging::PAGE_SIZE - page_offset as u64) as usize);
                     
-                    // DEBUG: Print first few bytes of source data
-                    if src_offset == 0 {
-                         let ptr = segment_data.as_ptr();
-                         unsafe {
-                             debugln!("[ELF] Segment Data Start: {:02x} {:02x} {:02x} {:02x} ...", 
-                                 *ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3));
-                         }
-                    }
-
                     unsafe {
                         core::ptr::copy_nonoverlapping(
                             segment_data.as_ptr().add(src_offset),

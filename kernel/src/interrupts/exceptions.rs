@@ -117,17 +117,16 @@ pub const TIMER_INT: u8 = 32;
 pub const KEYBOARD_INT: u8 = 33;
 
 pub extern "x86-interrupt" fn keyboard_handler(_info: &mut StackFrame) {
-
     let scancode: u8 = inb(0x60);
+    // crate::debugln!("KEYBOARD IRQ: {:#x}", scancode); // Uncomment if needed, but let's test mouse first.
 
     if let Some(character) = crate::drivers::periferics::keyboard::handle_scancode(scancode) {
-        KEYBOARD_BUFFER.lock().push_back(character); // Push to buffer instead of printing
+        KEYBOARD_BUFFER.lock().push_back(character); 
     }
 
     unsafe {
         (*(&raw const crate::interrupts::pic::PICS)).end_interrupt(KEYBOARD_INT);
     }
-
 }
 
 pub const MOUSE_INT: u8 = 44;
@@ -137,10 +136,34 @@ pub static mut MOUSE_PACKET: [u8; 4] = [0; 4];
 pub static mut MOUSE_IDX: usize = 0;
 
 pub extern "x86-interrupt" fn mouse_handler(_info: &mut StackFrame) {
+    use crate::drivers::periferics::mouse::{MOUSE_PACKET, MOUSE_IDX, MOUSE_PACKET_SIZE};
 
-    let _data = inb(0x60);
+    let data = inb(0x60);
+    // crate::debugln!("[MOUSE IRQ] Data: {:#x}", data);
 
     unsafe {
+        // Sync check: Byte 0 must have Bit 3 set (always 1 for standard/IntelliMouse packets)
+        // This prevents misalignment if we drop a byte.
+        if MOUSE_IDX == 0 && (data & 0x08) == 0 {
+            // crate::debugln!("[MOUSE] Lost Sync (Byte 0: {:#x})", data);
+            (*(&raw const crate::interrupts::pic::PICS)).end_interrupt(MOUSE_INT);
+            return;
+        }
+
+        MOUSE_PACKET[MOUSE_IDX] = data;
+        MOUSE_IDX += 1;
+
+        if MOUSE_IDX >= MOUSE_PACKET_SIZE {
+            // Pad with 0 if packet size is 3 but struct expects 4
+            if MOUSE_PACKET_SIZE == 3 {
+                MOUSE_PACKET[3] = 0;
+            }
+            
+            // crate::debugln!("[MOUSE] Packet: {:?} {:?} {:?} {:?}", MOUSE_PACKET[0], MOUSE_PACKET[1], MOUSE_PACKET[2], MOUSE_PACKET[3]);
+            (*(&raw mut crate::composer::MOUSE)).cursor(MOUSE_PACKET);
+            MOUSE_IDX = 0;
+        }
+
         (*(&raw const crate::interrupts::pic::PICS)).end_interrupt(MOUSE_INT);
     }
 }

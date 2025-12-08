@@ -42,8 +42,6 @@ pub fn init() {
             let entry = mmap.entries[i];
             if entry.length == 0 { continue; }
             
-            debugln!("[PMM] MMap Entry {}: Base={:#x}, Len={:#x}, Type={}", i, entry.base + 0, entry.length + 0, entry.memory_type + 0);
-
             let end = entry.base + entry.length;
             if end > max_addr {
                 max_addr = end;
@@ -64,32 +62,27 @@ pub fn init() {
         // We explicitly look for memory ABOVE 10MB (0xA00000) to avoid:
         // - The first 1MB (BIOS/VGA)
         // - The Kernel (loaded somewhere low)
-                    // - The Hardcoded Heap (0x300000 - 0x400000)
-                    let safe_threshold = 0xA00000;
-                                let mut bitmap_addr: u64 = 0;
+        // - The Hardcoded Heap (0x300000 - 0x400000)
+        let safe_threshold = 0xA00000;
+        let mut bitmap_addr: u64 = 0;
         let mut found = false;
 
         for i in 0..32 {
             let entry = mmap.entries[i];
-            // Type 1 = Usable
             if entry.memory_type == 1 {
-                // Check if this block can hold the bitmap starting above safe_threshold
                 let mut candidate_base = entry.base;
                 if candidate_base < safe_threshold {
-                    // If the block starts below threshold, see if it extends above it
                     if entry.base + entry.length > safe_threshold {
                         candidate_base = safe_threshold;
                     } else {
-                        continue; // Block is entirely below threshold
+                        continue;
                     }
                 }
 
-                // Align to page
                 if candidate_base % PAGE_SIZE != 0 {
                     candidate_base = (candidate_base + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
                 }
-                
-                // Check if enough space remains in this block
+
                 let block_end = entry.base + entry.length;
                 if candidate_base + (bitmap_size as u64) <= block_end {
                     bitmap_addr = candidate_base;
@@ -152,37 +145,33 @@ pub fn init() {
         }
         debugln!("[PMM] After bitmap marking: is_bit_set(0x4000/4096) = {}", is_bit_set(0x4000 / PAGE_SIZE as usize));
 
-// 6. Mark 0-4MB as used (Legacy + Kernel + Heap)
-        let frames_reserved = safe_threshold / PAGE_SIZE; // 1024 frames (0x0 to 0x3FF000)
-        debugln!("[PMM] Marking 0-4MB as used. frames_reserved={}", frames_reserved);
-        debugln!("[PMM] Before 0-4MB marking: is_bit_set(0x4000/4096) = {}", is_bit_set(0x4000 / PAGE_SIZE as usize));
-        for f in 0..frames_reserved { // f goes from 0 to 1023.
+        // 6. Mark 0-4MB as used (Legacy + Kernel + Heap)
+        // Safe threshold is where we put the bitmap. We want to reserve everything below it.
+        let frames_reserved = safe_threshold / PAGE_SIZE; 
+        debugln!("[PMM] Marking 0-{}MB as used. frames_reserved={}", safe_threshold / 1024 / 1024, frames_reserved);
+        
+        for f in 0..frames_reserved { 
+             /*
+             if f % 500 == 0 {
+                 debugln!("[PMM] Marking frame {}", f);
+             }
+             */
+             
              if f < total_frames as u64 {
-                 // Forcefully set the bit.
-                 // We need to re-evaluate used_frames increment/decrement.
-                 // The safest is to re-calculate used_frames at the end, or only increment if it was actually free.
-                 // For now, let's just make sure the bit is SET.
                  if !is_bit_set(f as usize) {
                     set_bit(f as usize);
-                    // No used_frames increment here yet, we will re-calculate total later
+                    (*pmm_ptr).used_frames += 1;
                  }
              }
         }
-        // Recalculate used_frames based on actual set bits after all marking is done.
-        (*pmm_ptr).used_frames = 0;
-        for i in 0..total_frames {
-            if is_bit_set(i) {
-                (*pmm_ptr).used_frames += 1;
-            }
-        }
-        debugln!("[PMM] After 0-4MB marking: is_bit_set(0x4000/4096) = {}", is_bit_set(0x4000 / PAGE_SIZE as usize));
+        
+        debugln!("[PMM] After 0-4MB marking.");
 
         debugln!("[PMM] Initialized. Used: {} KB, Free: {} KB", 
             ((*pmm_ptr).used_frames * 4), 
             (total_frames - (*pmm_ptr).used_frames) * 4
         );    }
 }
-
 // Minimum frame index from which user physical memory can be allocated.
 // This is based on the safe_threshold used in pmm::init (0xA00000 = 10MB).
 const MIN_ALLOC_FRAME_IDX: usize = (0xA00000 / PAGE_SIZE) as usize;

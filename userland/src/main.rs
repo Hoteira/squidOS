@@ -20,10 +20,8 @@ pub extern "C" fn _start() -> ! {
 
     let width = 200;
     let height = 200;
-    let buffer_size = width * height * 4; // 4 bytes per pixel (RGBA)
+    let buffer_size = width * height * 4; 
 
-    // Allocate buffer for the window (using malloc syscall)
-    // This returns a pointer to an identity-mapped frame accessible by user
     let buffer_ptr = malloc(buffer_size);
     
     if buffer_ptr == 0 {
@@ -31,7 +29,6 @@ pub extern "C" fn _start() -> ! {
         loop { std::os::yield_task(); }
     }
     
-    // Create local buffer slice to draw into
     let buffer = unsafe { core::slice::from_raw_parts_mut(buffer_ptr as *mut u32, width * height) };
 
     // Fill buffer with blue color
@@ -52,8 +49,6 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    // Create and register the window
-    // Note: We use the malloc'd pointer 'buffer_ptr'
     let mut window = Window::new(width, height, buffer_ptr);
     window.x = (screen_width - width) / 2;
     window.y = (screen_height - height) / 2;
@@ -63,13 +58,11 @@ pub extern "C" fn _start() -> ! {
     
     println!("Window created with ID: {}", window_id);
 
-    // Initial draw (pushes buffer to window backbuffer in kernel)
+    // Initial draw 
     update_window(&window);
 
     println!("Entering event loop...");
     loop {
-        // In a real app, we would poll events here. 
-        // For now, just yield to let the OS compositor render.
-        std::os::yield_task();
+        std::os::yield_task(); 
     }
 }

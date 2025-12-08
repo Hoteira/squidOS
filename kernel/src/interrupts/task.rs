@@ -115,8 +115,9 @@ impl Task {
         // Allocate stack (Kernel Stack for kernel tasks)
         self.stack = pmm::allocate_frame().expect("Task init: OOM");
         
+        // Kernel stack is identity mapped by bootloader (0-4GB), so no mapping needed.
         let stack_top = self.stack + 4096;
-        self.kernel_stack = stack_top; // Used for TSS RSP0 (and matching logic)
+        self.kernel_stack = stack_top; 
 
         let state_size = core::mem::size_of::<CPUState>();
         let state_ptr = (stack_top - state_size as u64) as *mut CPUState;
@@ -153,17 +154,16 @@ impl Task {
 
         // 1. Allocate Kernel Stack (for TSS RSP0 and context saving)
         let k_frame = pmm::allocate_frame().expect("Task init_user: OOM (kstack)");
-        // FIX: Ensure kernel stack frame is mapped in the kernel so we can write to it
-        unsafe { vmm::map_page(k_frame, k_frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None); }
+        // We assume k_frame is < 4GB and thus already identity mapped by bootloader
         self.kernel_stack = k_frame + 4096;
 
         // 2. Allocate User Stack (physical frame)
         let u_frame = pmm::allocate_frame().expect("Task init_user: OOM (ustack)");
         self.stack = u_frame; 
         
-        // Map it to virtual user space
-        let u_stack_virt = vmm::map_user_stack(u_frame, self.pml4_phys);
-        let u_stack_top = u_stack_virt + 4096; // This will be used as the User RSP
+        // Identity map the user stack! No more high virtual addresses.
+        // We assume u_frame is < 4GB and accessible to user (bootloader set User bit).
+        let u_stack_top = u_frame + 4096; 
 
         // 3. Setup CPU State on the KERNEL Stack
         let state_size = core::mem::size_of::<CPUState>();
@@ -187,9 +187,9 @@ impl Task {
             
             // User Context
             (*state_ptr).rip = entry_point; 
-            (*state_ptr).cs = 0x33; // User Code (0x30) | RPL 3
-            (*state_ptr).rflags = 0x202; // Interrupts enabled
-            (*state_ptr).rsp = u_stack_top; // User Stack
+            (*state_ptr).cs = 0x33; // User Code 64 (0x30) | RPL 3
+            (*state_ptr).rflags = 0x202; // Interrupts enabled (No IOPL 3!)
+            (*state_ptr).rsp = u_stack_top; // User Stack (Physical/Identity)
             (*state_ptr).ss = 0x23; // User Data (0x20) | RPL 3
         }
     }
@@ -446,7 +446,7 @@ pub extern "C" fn switch(rsp: u64) -> u64 {
              KERNEL_STACK_PTR = k_stack;
         }
         
-        debugln!("[Switch] Returning RSP: {:#x}", new_state as u64);
+        //debugln!("[Switch] Returning RSP: {:#x}", new_state as u64);
         
         // debugln!("[Switch] Switching to task. RIP: {:#x}, RSP: {:#x}, CR3: {:#x}", (*new_state).rip, (*new_state).rsp, pml4_phys);
 

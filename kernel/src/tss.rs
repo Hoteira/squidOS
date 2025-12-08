@@ -57,12 +57,10 @@ pub fn init_ists() {
 
         // Allocate IST 1 (Double Fault)
         let ist1_frame = pmm::allocate_frame().expect("TSS: OOM for IST1");
-        vmm::map_page(ist1_frame, ist1_frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
         (*tss_struct).ist1 = ist1_frame + 4096;
 
         // Allocate IST 2 (Page Fault)
         let ist2_frame = pmm::allocate_frame().expect("TSS: OOM for IST2");
-        vmm::map_page(ist2_frame, ist2_frame, paging::PAGE_PRESENT | paging::PAGE_WRITABLE, None);
         (*tss_struct).ist2 = ist2_frame + 4096;
         
         crate::debugln!("[TSS] IST1 (DF) set to {:#x}", (*tss_struct).ist1 + 0);
