@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "elfic",
+    "elfic", "inkui",
     "kernel",
     "std",
     "userland",

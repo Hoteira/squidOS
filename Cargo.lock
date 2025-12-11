@@ -16,6 +16,13 @@ name = "elfic"
 version = "0.1.0"
 
 [[package]]
+name = "inkui"
+version = "0.1.0"
+dependencies = [
+ "std",
+]
+
+[[package]]
 name = "kernel"
 version = "0.1.0"
 dependencies = [
@@ -38,6 +45,7 @@ name = "userland"
 version = "0.1.0"
 dependencies = [
  "asvgard",
+ "inkui",
  "std",
  "titanf",
 ]

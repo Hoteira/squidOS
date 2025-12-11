@@ -46,8 +46,8 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     fs::dma::init();
     // Move heap to 48MB to avoid collision with PMM Bitmap (10MB-43MB)
     std::memory::heap::init_heap(0x03000000 as *mut u8, 0x100_0000);
-
-    debugln!("[KERNEL] Hello World!");
+    
+    crate::fs::vfs::init();
 
     tss::init_ists();
 
@@ -55,63 +55,38 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
     unsafe { (*(&raw mut composer::DISPLAY_SERVER)).init(); }
 
-    debugln!("[KERNEL] Setting initial TSS for user tasks");
-
     let first_user_task = interrupts::task::TASK_MANAGER.lock()
         .tasks.iter()
         .find(|t| t.state == interrupts::task::TaskState::Ready && t.kernel_stack != 0)
         .map(|t| t.kernel_stack);
 
-    
-
     if let Some(kstack) = first_user_task {
         tss::set_tss(kstack);
-        debugln!("[KERNEL] TSS RSP0 set to {:#x}", kstack);
     }
-
-    debugln!("[KERNEL] Initializing Ext2...");
-
-    match Ext2::new(0xE0, 16384) {
-        Ok(fs) => {
-            debugln!("[EXT2] Superblock found!");
-            debugln!(" - Magic: {:#x}", fs.superblock.magic + 0);
-
-            crate::fs::vfs::mount(0xE0, fs);
-
-            let mut elf_buf = alloc::vec![0u8; 1024 * 1024]; // 1MB buffer
-            if let Ok(bytes) = crate::fs::vfs::read("@0xE0/user", 0, elf_buf.len() as u64, elf_buf.as_mut_ptr()) {
-                 debugln!("[ELF] Read {} bytes via VFS.", bytes);
-                 unsafe {
-                     let user_pml4 = memory::vmm::new_user_pml4();
-                     match crate::fs::elf::load_elf(&elf_buf[0..bytes], user_pml4) {
-                         Ok(entry_point) => {
-                             debugln!("[ELF] Loaded. Entry: {:#x}", entry_point);
-                             interrupts::task::TASK_MANAGER.lock().add_user_task(entry_point, user_pml4, None);
-                         }
-                         Err(e) => debugln!("[ELF] Load failed: {}", e),
-                     }
-                 }
-            } else {
-                debugln!("[VFS] Failed to read @0xE0/user");
-            }
-        }
-        Err(e) => debugln!("[EXT2] Failed to mount: {}", e),
-    }
-
-    debugln!("[KERNEL] Starting Kernel Tasks...");
-
-    load_idt();
-    debugln!("[KERNEL] IDT loaded.");
-
-    init_syscall_msrs(); // Initialize SYSCALL MSRs
-    debugln!("[KERNEL] SYSCALL MSRs configured.");
 
     drivers::periferics::mouse::init_mouse();
-    debugln!("[KERNEL] Mouse Initialized.");
+
+
+    crate::fs::vfs::mount(0xE0, Ext2::new(0xE0, 16384).unwrap());
+
+    let path = crate::fs::vfs::Path::new("@0xE0/user").unwrap();
+    let mut node = crate::fs::vfs::open(&path).unwrap();
+    let mut buf = alloc::vec![0u8; node.size() as usize];
+    let n = node.read(0, &mut buf).unwrap();
+
+    unsafe {
+        let pml4 = memory::vmm::new_user_pml4();
+        let entry = crate::fs::elf::load_elf(&buf[0..n], pml4).unwrap();
+        let _ = interrupts::task::TASK_MANAGER.lock().add_user_task(entry, pml4, None);
+    }
+
+
+    load_idt();
+
+    init_syscall_msrs(); // Initialize SYSCALL MSRs
 
     // Enable interrupts only AFTER all drivers are initialized
     unsafe { asm!("sti"); }
-    debugln!("[KERNEL] Interrupts enabled.");
 
     loop {}
 }
@@ -119,18 +94,16 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 fn init_pat() {
     unsafe {
         let mut pat = rdmsr(PAT_MSR);
-        debugln!("[CPU] Original PAT: {:#x}", pat);
-        
+
         // PAT Layout: 8 entries of 1 byte each (bits 0-2 are memory type, others reserved/0).
         // We want Index 4 (Bits 32-39) to be Write-Combining (0x01).
         // Clear index 4
         pat &= !(0xFFu64 << 32);
         // Set index 4 to 0x01 (WC)
         pat |= (0x01u64 << 32);
-        
+
         wrmsr(PAT_MSR, pat);
-        debugln!("[CPU] New PAT: {:#x}", pat);
-        
+
         // Flush TLB to ensure new attributes take effect
         let cr3: u64;
         asm!("mov {}, cr3", out(reg) cr3);
@@ -156,51 +129,19 @@ fn init_syscall_msrs() {
     unsafe {
         // 1. Enable SYSCALL/SYSRET in EFER MSR
         let mut efer = rdmsr(EFER_MSR);
-        efer |= 1; // Set SCE (SYSCALL Enable) bit
+        efer |= 1;
         wrmsr(EFER_MSR, efer);
-        debugln!("[SYSCALL] EFER MSR configured.");
 
-        // 2. Configure STAR MSR
-        // STAR MSR format:
-        // Bits 63:48 -> SYSRET CS (user code segment, shifted left by 16)
-        // Bits 47:32 -> SYSCALL CS (kernel code segment, shifted left by 16)
-        
-        // Swiftboot GDT:
-        // 0x20: User Data
-        // 0x28: Kernel Code 64
-        // 0x30: User Code 64
-        
-        // Sysret Target: We want CS=0x30 (User Code).
-        // SYSRET CS = Base + 16. -> Base = 0x30 - 16 = 0x20.
-        // SYSRET SS = Base + 8  = 0x20 + 8  = 0x28 (Kernel Code 64). 
-        // (Note: We don't use sysret, we use iretq, so the SS mismatch here is less critical for now, 
-        // but if we did use sysret, we'd need a different GDT).
         let sysret_cs_base = 0x20;
-        
-        // Syscall Target: We want CS=0x28 (Kernel Code).
-        // SYSCALL CS = Base. -> Base = 0x28.
-        // SYSCALL SS = Base + 8 = 0x30 (User Code 64).
-        // (Note: This loads User Code selector into Kernel SS. This is invalid but often ignored in 64-bit 
-        // mode or we switch stack immediately anyway).
+
         let syscall_cs_base = 0x28;
 
         let star_value = ((sysret_cs_base as u64) << 48) | ((syscall_cs_base as u64) << 32);
         wrmsr(STAR_MSR, star_value);
-        debugln!("[SYSCALL] STAR MSR configured. Kernel Base: {:#x}, User Base: {:#x}", syscall_cs_base, sysret_cs_base);
-
-        // 3. Configure LSTAR MSR (Long Mode SYSCALL Target Address)
-        // This points to our syscall_entry function.
         wrmsr(LSTAR_MSR, interrupts::syscalls::syscall_entry as u64);
-        debugln!("[SYSCALL] LSTAR MSR configured to syscall_entry at {:#x}", interrupts::syscalls::syscall_entry as u64);
 
-        // 4. Configure SFMASK MSR (SYSCALL Flag Mask)
-        // Bits in RFLAGS corresponding to set bits in SFMASK are cleared on SYSCALL entry.
-        // We want to clear the Interrupt Flag (IF) (bit 9) and Trap Flag (TF) (bit 8)
-        // to prevent interrupts/traps immediately after entering the kernel.
-        // Also clear other flags that user shouldn't control in kernel mode.
         let rflags_mask = (1 << 9) | (1 << 8); // IF and TF
         wrmsr(SFMASK_MSR, rflags_mask);
-        debugln!("[SYSCALL] SFMASK MSR configured with mask {:#x}", rflags_mask);
     }
 }
 
@@ -220,7 +161,6 @@ pub fn load_idt() {
 }
 
 #[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    debugln!("[KERNEL_PANIC]\n{}", info);
+fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }

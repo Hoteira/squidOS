@@ -1,7 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::boot::{BOOT_INFO, MemoryMapEntry};
-#[allow(unused_imports)]
-use crate::debugln;
+
 
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -36,8 +35,6 @@ static mut PMM: StructPmm = StructPmm {
 
 pub fn init() {
     unsafe {
-        debugln!("[PMM] Init (Struct-based)...");
-        
         let mmap = (*(&raw mut BOOT_INFO)).mmap;
         
         let mut max_addr: u64 = 0;
@@ -52,12 +49,9 @@ pub fn init() {
         
         let pmm_ptr = &raw mut PMM;
         (*pmm_ptr).total_ram = max_addr;
-        debugln!("[PMM] Total RAM: {:#x}", max_addr);
 
         let pages = (0xA00000 / PAGE_SIZE) as usize;
         add_allocation(0, 0, pages);
-        
-        debugln!("[PMM] Reserved 0-10MB.");
     }
 }
 
@@ -76,7 +70,6 @@ unsafe fn add_allocation(pid: u64, start: u64, count: usize) -> bool {
         return false;
     }
 
-    // Find insertion index to keep sorted by start address
     let mut idx = 0;
     while idx < count_used {
         if (*pmm_ptr).allocations[idx].start > start {
@@ -84,8 +77,7 @@ unsafe fn add_allocation(pid: u64, start: u64, count: usize) -> bool {
         }
         idx += 1;
     }
-    
-    // Shift elements right
+
     if idx < count_used {
         for i in (idx..count_used).rev() {
             (*pmm_ptr).allocations[i+1] = (*pmm_ptr).allocations[i];

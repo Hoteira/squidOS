@@ -2,22 +2,63 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
-use alloc::collections::BTreeMap;
 
-pub static mut FILESYSTEMS: BTreeMap<u8, Box<dyn FileSystem>> = BTreeMap::new();
+// Using const { None } for array initialization of non-Copy types (Option<Box<...>>)
+// This assumes a recent Rust compiler supporting inline const expressions or relaxed array initialization.
+pub static mut FILESYSTEMS: [Option<Box<dyn FileSystem>>; 256] = [const { None }; 256];
+pub static mut OPEN_FILES: [Option<FileHandle>; 256] = [const { None }; 256];
+
+pub struct FileHandle {
+    pub node: Box<dyn VfsNode>,
+    pub offset: u64,
+}
+
+pub fn init() {
+    // No explicit initialization needed for static arrays initialized with None
+}
 
 pub fn mount(disk_id: u8, fs: Box<dyn FileSystem>) {
     unsafe {
-        (*core::ptr::addr_of_mut!(FILESYSTEMS)).insert(disk_id, fs);
+        FILESYSTEMS[disk_id as usize] = Some(fs);
     }
 }
 
-pub fn open(path_str: &str) -> Result<Box<dyn VfsNode>, String> {
-    let path = Path::parse(path_str)?;
+pub fn open_file(path_obj: &Path) -> Result<usize, String> {
+    let node = open(path_obj)?;
     unsafe {
-        if let Some(fs) = (*core::ptr::addr_of_mut!(FILESYSTEMS)).get_mut(&path.disk_id) {
+        for i in 3..256 {
+            if OPEN_FILES[i].is_none() {
+                OPEN_FILES[i] = Some(FileHandle { node, offset: 0 });
+                return Ok(i);
+            }
+        }
+        Err(String::from("No free file descriptors"))
+    }
+}
+
+pub fn get_file(fd: usize) -> Option<&'static mut FileHandle> {
+    unsafe {
+        if fd < 256 {
+            OPEN_FILES[fd].as_mut()
+        } else {
+            None
+        }
+    }
+}
+
+pub fn close_file(fd: usize) {
+    unsafe {
+         if fd > 2 && fd < 256 {
+             OPEN_FILES[fd] = None;
+         }
+    }
+}
+
+pub fn open(path_obj: &Path) -> Result<Box<dyn VfsNode>, String> {
+    unsafe {
+        if let Some(fs) = &mut FILESYSTEMS[path_obj.disk_id as usize] {
              let mut node = fs.root()?;
-             for component in path.components {
+             for component in &path_obj.components {
                  node = node.find(&component)?;
              }
              Ok(node)
@@ -27,12 +68,11 @@ pub fn open(path_str: &str) -> Result<Box<dyn VfsNode>, String> {
     }
 }
 
-pub fn read(path_str: &str, offset: u64, size: u64, buffer: *mut u8) -> Result<usize, String> {
-    let path = Path::parse(path_str)?;
+pub fn read(path_obj: Path, offset: u64, size: u64, buffer: *mut u8) -> Result<usize, String> {
     unsafe {
-        if let Some(fs) = (*core::ptr::addr_of_mut!(FILESYSTEMS)).get_mut(&path.disk_id) {
+        if let Some(fs) = &mut FILESYSTEMS[path_obj.disk_id as usize] {
              let mut node = fs.root()?;
-             for component in path.components {
+             for component in path_obj.components {
                  node = node.find(&component)?;
              }
              let slice = core::slice::from_raw_parts_mut(buffer, size as usize);
@@ -43,7 +83,6 @@ pub fn read(path_str: &str, offset: u64, size: u64, buffer: *mut u8) -> Result<u
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
     pub disk_id: u8,
@@ -51,7 +90,7 @@ pub struct Path {
 }
 
 impl Path {
-    pub fn parse(path_str: &str) -> Result<Self, String> {
+    pub fn new(path_str: &str) -> Result<Self, String> {
         if !path_str.starts_with('@') {
             return Err(String::from("Path must start with '@' (e.g., @0/path/to/file)"));
         }

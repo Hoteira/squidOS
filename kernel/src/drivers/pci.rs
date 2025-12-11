@@ -119,13 +119,7 @@ pub fn list_devices() {
                     let class_code = (class_subclass >> 24) & 0xFF;
                     let subclass_code = (class_subclass >> 16) & 0xFF;
 
-                    crate::debugln!(
-                        "CLASS: {:#X}, SUBCLASS: {:#X}, VENDOR: {:#X}, DEVICE: {:#X}",
-                        class_code,
-                        subclass_code,
-                        vendor_id,
-                        device_id
-                    );
+
                 }
             }
         }
@@ -134,7 +128,7 @@ pub fn list_devices() {
 impl PciDevice {
     #[allow(dead_code)]
     pub fn new(vendor_id: u32, device_id: u32) -> Option<PciDevice> {
-        crate::debugln!("Finding device...");
+
         find_device(vendor_id, device_id)
     }
 

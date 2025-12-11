@@ -1,5 +1,5 @@
 use core::arch::{asm, naked_asm};
-use crate::debugln;
+
 use crate::memory::{paging, pmm, vmm};
 
 #[allow(dead_code)]

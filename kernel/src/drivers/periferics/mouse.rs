@@ -1,6 +1,5 @@
 use crate::drivers::port::{inb, outb};
-#[allow(unused_imports)]
-use crate::debugln;
+
 use alloc::vec::Vec;
 
 pub const MOUSE_INT: u8 = 44;
@@ -51,7 +50,7 @@ pub const CURSOR_WIDTH: usize = 32;
 pub const CURSOR_HEIGHT: usize = 32;
 
 pub fn init_mouse() {
-    debugln!("[MOUSE] Initializing...");
+
 
 
     wait();
@@ -80,21 +79,21 @@ pub fn init_mouse() {
     mouse_write(0xF2);
     let _ack_id = mouse_read();
     let id = mouse_read();
-    debugln!("[MOUSE] Device ID: {:#x}", id);
+
 
     unsafe {
         if id == 3 || id == 4 {
             MOUSE_PACKET_SIZE = 4;
-            debugln!("[MOUSE] IntelliMouse Mode Enabled (4-byte packets)");
+
         } else {
             MOUSE_PACKET_SIZE = 3;
-            debugln!("[MOUSE] Standard PS/2 Mode (3-byte packets)");
+
         }
     }
 
     mouse_write(0xF4);
     let ack_enable = mouse_read();
-    debugln!("[MOUSE] Enable Reporting ACK: {:#x}", ack_enable);
+
 }
 
 fn mouse_write(value: u8) {

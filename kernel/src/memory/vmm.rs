@@ -1,12 +1,9 @@
 use crate::memory::{pmm, paging};
 use core::arch::asm;
-use crate::debugln;
 
 pub fn init() {
     unsafe {
-        let pml4_phys = (*(&raw const crate::boot::BOOT_INFO)).pml4;
-        debugln!("[VMM] PML4 at {:#x}", pml4_phys);
-        debugln!("[VMM] Relying on Bootloader Identity Map (0-4GiB).");
+        let _pml4_phys = (*(&raw const crate::boot::BOOT_INFO)).pml4;
     }
 }
 

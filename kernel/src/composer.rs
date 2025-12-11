@@ -2,7 +2,7 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use crate::display::{Color, DisplayServer, Mouse, State};
 use core::sync::atomic::{AtomicU16, Ordering};
-use crate::debugln; // Use debugln! instead of libk::print
+use crate::debugln;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(C)]
@@ -118,7 +118,7 @@ impl EventQueue {
 
         result
     }
-    
+
     pub fn add_event(&mut self, event: Event) {
         if self.queue.len() >= 1000 {
             self.reset_queue();
@@ -145,16 +145,13 @@ impl DisplayServer {
         }
 
         self.framebuffer = vbe.framebuffer as u64;
-        
+
         let size_bytes = self.pitch as usize * self.height as usize;
-        // Allocate pages for double buffer
-        // PAGE_SIZE is 4096
         let pages = (size_bytes + 4095) / 4096;
-        
+
         unsafe {
             if let Some(buffer) = crate::memory::pmm::allocate_frames(pages) {
                 self.double_buffer = buffer;
-                debugln!("[DisplayServer] Double buffer allocated at {:#x} ({} pages)", buffer, pages);
             } else {
                 panic!("[DisplayServer] Failed to allocate double buffer!");
             }
@@ -231,7 +228,7 @@ impl DisplayServer {
                         let dst_offset = (y as usize + row) * dst_pitch + (x as usize + col) * 4;
 
                         let src_a = *src_ptr.add(src_offset + 3);
-                        
+
                         if src_a == 0 {
                             continue; // Transparent
                         } else if src_a == 255 {
@@ -268,7 +265,7 @@ impl DisplayServer {
                         let dst_offset = (y as usize + row) * dst_pitch + (x as usize + col) * 3;
 
                         let src_a = *src_ptr.add(src_offset + 3);
-                        
+
                         if src_a == 0 {
                             continue;
                         } else if src_a == 255 {
@@ -425,11 +422,11 @@ impl DisplayServer {
 
         // Fallback for non-32bpp or weird pitch
         if self.depth != 32 {
-             unsafe {
+            unsafe {
                 for i in 0..CURSOR_HEIGHT {
                     for j in 0..CURSOR_WIDTH {
                         let color = CURSOR_BUFFER[i * CURSOR_WIDTH + j];
-                        if color != 0 { 
+                        if color != 0 {
                             self.write_pixel(y.wrapping_add(i as u16) as u32, x.wrapping_add(j as u16) as u32, Color::from_u32(color));
                         }
                     }
@@ -452,20 +449,20 @@ impl DisplayServer {
             for row in 0..CURSOR_HEIGHT {
                 let screen_y = my + row;
                 if screen_y >= screen_h { break; }
-                
+
                 let row_byte_offset = screen_y * pitch_bytes;
-                
+
                 for col in 0..CURSOR_WIDTH {
                     let screen_x = mx + col;
                     if screen_x >= screen_w { break; }
-                    
+
                     let pixel_offset = row_byte_offset + screen_x * 4;
-                    
+
                     // Read background from Framebuffer (to capture dragged windows not in DB)
                     let bg_color = *(fb_ptr.add(pixel_offset) as *const u32);
-                    
+
                     let cursor_color = CURSOR_BUFFER[row * CURSOR_WIDTH + col];
-                    
+
                     if cursor_color != 0 {
                         temp_buf[row * CURSOR_WIDTH + col] = cursor_color;
                     } else {
@@ -477,9 +474,9 @@ impl DisplayServer {
             for row in 0..CURSOR_HEIGHT {
                 let screen_y = my + row;
                 if screen_y >= screen_h { break; }
-                
+
                 let fb_offset = screen_y * pitch_bytes + mx * 4;
-                
+
                 let copy_w = if mx + CURSOR_WIDTH > screen_w {
                     screen_w - mx
                 } else {
@@ -513,7 +510,7 @@ impl Mouse {
 
         // Parse Sign Bits from Byte 0 (Standard PS/2)
         if (data[0] & 0x10) != 0 { // X Sign
-            x_rel |= 0xFF00u16 as i16; 
+            x_rel |= 0xFF00u16 as i16;
         }
         if (data[0] & 0x20) != 0 { // Y Sign
             y_rel |= 0xFF00u16 as i16;
@@ -566,16 +563,16 @@ impl Mouse {
                     W_HEIGHT = 0;
 
                 } else if (*(&raw mut DRAGGING_WINDOW)).load(Ordering::Relaxed) != 0 {
-                     let wid = (*(&raw mut DRAGGING_WINDOW)).load(Ordering::Relaxed) as usize;
-                     // Drop: Commit final position to Double Buffer
-                     (*(&raw mut COMPOSER)).copy_window(wid);
-                     // Fix artifacts: Redraw window to FB to cover any holes made by cursor restore from empty DB
-                     (*(&raw mut COMPOSER)).copy_window_fb(wid);
+                    let wid = (*(&raw mut DRAGGING_WINDOW)).load(Ordering::Relaxed) as usize;
+                    // Drop: Commit final position to Double Buffer
+                    (*(&raw mut COMPOSER)).copy_window(wid);
+                    // Fix artifacts: Redraw window to FB to cover any holes made by cursor restore from empty DB
+                    (*(&raw mut COMPOSER)).copy_window_fb(wid);
 
-                     (*(&raw mut DRAGGING_WINDOW)).store(0, Ordering::Relaxed);
-                     (*(&raw mut RESIZING_WINDOW)).store(0, Ordering::Relaxed);
-                     W_WIDTH = 0;
-                     W_HEIGHT = 0;
+                    (*(&raw mut DRAGGING_WINDOW)).store(0, Ordering::Relaxed);
+                    (*(&raw mut RESIZING_WINDOW)).store(0, Ordering::Relaxed);
+                    W_WIDTH = 0;
+                    W_HEIGHT = 0;
                 }
                 // Draw mouse before returning (Mouse not clicked path)
                 (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y);
@@ -585,7 +582,7 @@ impl Mouse {
 
         if self.left {
             if !prev_left {
-                 debugln!("Left Click at {}, {}", self.x, self.y);
+                debugln!("Left Click at {}, {}", self.x, self.y);
             }
 
             let w = unsafe { (*(&raw mut COMPOSER)).find_window(self.x as usize, self.y as usize) };
@@ -593,16 +590,16 @@ impl Mouse {
             if unsafe { (*(&raw mut RESIZING_WINDOW)).load(Ordering::Relaxed) != 0 } {
                 let dx = x_vec;
                 let dy = y_vec * -1; // Invert Y
-                
-                 let w = unsafe {
+
+                let w = unsafe {
                     (*(&raw mut COMPOSER))
                         .find_window_id((*(&raw mut RESIZING_WINDOW)).load(Ordering::Relaxed) as usize)
                         .unwrap()
                 };
-                
+
                 let final_width = self.rem_sign(unsafe { W_WIDTH } as i16 + dx) as usize;
                 let final_height = self.rem_sign(unsafe { W_HEIGHT } as i16 + dy) as usize;
-                
+
                 unsafe {
                     W_WIDTH = cap(final_width, ((*(&raw mut DISPLAY_SERVER)).width as usize).saturating_sub(w.x));
                     W_HEIGHT = cap(final_height, ((*(&raw mut DISPLAY_SERVER)).height as usize).saturating_sub(w.y));
@@ -678,14 +675,14 @@ impl Mouse {
 
             if let Some(ws) = w {
                 if ws.w_type == Items::Window && ws.z != 0 && unsafe { DRAG == false } {
-                     // Click to front
-                     let x = ws.x;
-                     let y = ws.y;
-                     let width = ws.width;
-                     let height = ws.height;
-                     let id = ws.id;
+                    // Click to front
+                    let x = ws.x;
+                    let y = ws.y;
+                    let width = ws.width;
+                    let height = ws.height;
+                    let id = ws.id;
 
-                     unsafe {
+                    unsafe {
                         for i in (*(&raw mut COMPOSER)).windows.iter_mut() {
                             if i.id != id {
                                 i.z = i.z.wrapping_add(1);
@@ -695,7 +692,7 @@ impl Mouse {
                         }
                         (*(&raw mut COMPOSER)).windows.sort_by_key(|w| w.z);
                         (*(&raw mut COMPOSER)).copy_window(id);
-                        
+
                         (*(&raw mut DISPLAY_SERVER)).copy_to_fb(
                             x as u32,
                             y as u32,
@@ -704,7 +701,7 @@ impl Mouse {
                         );
                         // Draw mouse (Click to front path)
                         (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y);
-                     }
+                    }
                 } else {
                     // Check Drag/Resize Start
                     if ws.can_move && self.y as usize >= ws.y && self.y as usize <= ws.y + 25 {
@@ -714,7 +711,7 @@ impl Mouse {
                                 (*(&raw mut DRAGGING_WINDOW)).store(0, Ordering::Relaxed);
                                 W_WIDTH = 0;
                                 W_HEIGHT = 0;
-                                
+
                                 (*(&raw mut DRAGGING_WINDOW)).store(ws.id as u16, Ordering::Relaxed);
                                 (*(&raw mut COMPOSER)).recompose_except(ws.id);
                             }
@@ -722,10 +719,10 @@ impl Mouse {
                             unsafe { (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y) };
                             return;
                         } else if ws.event_handler != 0 {
-                             let xc = ws.x;
-                             let yc = ws.y;
-                             let id = ws.id;
-                             unsafe {
+                            let xc = ws.x;
+                            let yc = ws.y;
+                            let id = ws.id;
+                            unsafe {
                                 (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(Event::Mouse(MouseEvent {
                                     wid: id as u32,
                                     x: self.x as usize - xc,
@@ -733,25 +730,25 @@ impl Mouse {
                                     buttons: [self.left, self.center, self.right],
                                     scroll: scroll_val,
                                 }));
-                             }
+                            }
                         }
                     } else if ws.can_move && self.is_bottom_right(ws.x as u16, ws.y as u16, ws.width as u16, ws.height as u16, self.x, self.y) {
-                         if unsafe { DRAG == true } {
-                             if unsafe { (*(&raw mut RESIZING_WINDOW)).load(Ordering::Relaxed) == 0 } {
-                                 unsafe {
-                                     W_WIDTH = ws.width;
-                                     W_HEIGHT = ws.height;
-                                     (*(&raw mut RESIZING_WINDOW)).store(ws.id as u16, Ordering::Relaxed);
-                                 }
-                             }
-                         }
+                        if unsafe { DRAG == true } {
+                            if unsafe { (*(&raw mut RESIZING_WINDOW)).load(Ordering::Relaxed) == 0 } {
+                                unsafe {
+                                    W_WIDTH = ws.width;
+                                    W_HEIGHT = ws.height;
+                                    (*(&raw mut RESIZING_WINDOW)).store(ws.id as u16, Ordering::Relaxed);
+                                }
+                            }
+                        }
                     } else {
-                         // Normal Click
-                         if ws.event_handler != 0 && unsafe { DRAG == false } {
-                             let xc = ws.x;
-                             let yc = ws.y;
-                             let id = ws.id;
-                             unsafe {
+                        // Normal Click
+                        if ws.event_handler != 0 && unsafe { DRAG == false } {
+                            let xc = ws.x;
+                            let yc = ws.y;
+                            let id = ws.id;
+                            unsafe {
                                 (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(Event::Mouse(MouseEvent {
                                     wid: id as u32,
                                     x: self.x as usize - xc,
@@ -759,8 +756,8 @@ impl Mouse {
                                     buttons: [self.left, self.center, self.right],
                                     scroll: scroll_val,
                                 }));
-                             }
-                         }
+                            }
+                        }
                     }
                 }
             }
@@ -1091,7 +1088,7 @@ impl Composer {
         unsafe {
             let display_server = &mut *(&raw mut DISPLAY_SERVER);
             if display_server.double_buffer != 0 {
-                 core::ptr::write_bytes(
+                core::ptr::write_bytes(
                     display_server.double_buffer as *mut u8,
                     0,
                     (display_server.pitch * display_server.height) as usize,

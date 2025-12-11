@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use crate::debugln;
+
 
 use crate::fs::disk;
 use crate::fs::ext2::structs::{Superblock, BlockGroupDescriptor, Inode};
@@ -83,7 +83,7 @@ impl Ext2 {
     }
 
     pub fn read_inode(&self, inode_idx: u32) -> Inode {
-        debugln!("DEBUG: read_inode({})", inode_idx);
+
         let group = (inode_idx - 1) / self.inodes_per_group;
         let index_in_group = (inode_idx - 1) % self.inodes_per_group;
         
@@ -199,17 +199,17 @@ impl VfsNode for Ext2Node {
         let mut bytes_read = 0;
         let mut current_offset = offset;
         
-        debugln!("DEBUG: Reading file size {}, offset {}, buf_len {}", self.size(), offset, buffer.len());
+
 
         while bytes_read < buffer.len() && current_offset < self.size() {
             let block_idx = (current_offset / fs.block_size) as u32;
             let block_offset = (current_offset % fs.block_size) as usize;
             
-            debugln!("DEBUG: Logical Block {}, Block Offset {}", block_idx, block_offset);
+
 
             let physical_block = fs.get_block_address(&self.inode, block_idx);
             
-            debugln!("DEBUG: Physical Block {}", physical_block);
+
 
             let mut block_buf = alloc::vec![0u8; fs.block_size as usize];
             

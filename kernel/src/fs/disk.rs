@@ -1,10 +1,10 @@
 use core::arch::asm;
 use crate::drivers::port::*;
-use crate::debugln;
+
 
 #[allow(dead_code)]
 pub fn read(lba: u64, disk: u8, buffer: &mut [u8]) {
-    debugln!("Disk: Read LBA {} (DMA Active: {})", lba, crate::fs::dma::is_active());
+
     if crate::fs::dma::is_active() {
         crate::fs::dma::read(lba, disk, buffer);
         return;

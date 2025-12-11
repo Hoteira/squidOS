@@ -28,7 +28,7 @@ pub struct Window {
     pub min_width: usize,
     pub min_height: usize,
 
-    pub event_handler: u32,
+    pub event_handler: usize,
     pub w_type: Items,
 }
 

@@ -32,7 +32,7 @@ pub fn init() {
         let fb_height = FRAMEBUFFER.height;
         let fb_bpp = FRAMEBUFFER.bpp;
         
-        crate::debugln!("[VIDEO] Framebuffer at {:#x} ({}x{} @ {}bpp)", phys_addr, fb_width, fb_height, fb_bpp);
+
     }
 }
 

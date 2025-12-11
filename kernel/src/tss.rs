@@ -59,8 +59,7 @@ pub fn init_ists() {
         let ist2_frame = pmm::allocate_frame().expect("TSS: OOM for IST2");
         (*tss_struct).ist2 = ist2_frame + 4096;
         
-        crate::debugln!("[TSS] IST1 (DF) set to {:#x}", (*tss_struct).ist1 + 0);
-        crate::debugln!("[TSS] IST2 (PF) set to {:#x}", (*tss_struct).ist2 + 0);
+
     }
 }
 

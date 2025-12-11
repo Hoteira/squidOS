@@ -166,16 +166,54 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             }
         }
 
+
         SYS_GET_HEIGHT => {
             unsafe {
                 context.rax = (*(&raw mut crate::composer::DISPLAY_SERVER)).height;
             }
         }
         
+        61 => { // SYS_OPEN
+             let ptr = context.rdi as *const u8;
+             let len = context.rsi as usize;
+             let s = unsafe { core::slice::from_raw_parts(ptr, len) };
+             let path_str = String::from_utf8_lossy(s);
+             
+             match crate::fs::vfs::Path::new(&path_str) {
+                 Ok(path_obj) => {
+                     match crate::fs::vfs::open_file(&path_obj) {
+                         Ok(fd) => context.rax = fd as u64,
+                         Err(_) => context.rax = u64::MAX,
+                     }
+                 },
+                 Err(_) => context.rax = u64::MAX,
+             }
+        }
+
+        62 => { // SYS_FILE_READ
+             let fd = context.rdi as usize;
+             let buf_ptr = context.rsi as *mut u8;
+             let len = context.rdx as usize;
+             let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
+             
+             if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                  match handle.node.read(handle.offset, buf) {
+                      Ok(n) => {
+                          handle.offset += n as u64;
+                          context.rax = n as u64;
+                      },
+                      Err(_) => context.rax = u64::MAX,
+                  }
+             } else {
+                 context.rax = u64::MAX;
+             }
+        }
+
         SYS_EXIT => {
             debugln!("[Syscall] Process exited with code {}", context.rdi + 0);
             loop { unsafe { asm!("hlt") } }
         }
+        
         _ => {
             debugln!("[Syscall] Unknown syscall #{}", syscall_num);
             context.rax = u64::MAX;
