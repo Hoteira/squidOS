@@ -1,6 +1,71 @@
 use crate::graphics::{draw_pixel, draw_u32};
 use crate::types::{Color, Size};
 use crate::math::sqrt_f64;
+use titanf::TrueTypeFont;
+
+pub fn draw_text(
+    buffer: &mut [u32],
+    buffer_width: usize,
+    x: usize,
+    y: usize,
+    text: &str,
+    font: &mut TrueTypeFont,
+    size: f32,
+    color: Color,
+) {
+    if buffer_width == 0 || color.a == 0 {
+        return;
+    }
+
+    let mut current_x = x;
+    let baseline_y = y; // Caller should handle baseline vs top-left logic? 
+                        // Instruction said "baseline should be added, not subtracted to the y".
+                        // Assuming y is the pen position.
+
+    for c in text.chars() {
+        let (metrics, bitmap) = font.get_char::<true>(c, size);
+        
+        // Draw the bitmap
+        // metrics.width, metrics.height is the bitmap size
+        // Where do we draw it?
+        // Usually: x = current_x + left_side_bearing
+        //          y = baseline_y - ascender? 
+        // User said: "baseline should be added... to the y".
+        // Let's assume y passed in is the "base" line y-coordinate.
+        // Wait, the Metrics struct has `base_line`.
+        // If I have a bitmap, where is the baseline *in* that bitmap?
+        // Usually standard metrics give you `top` or `bearingY`.
+        // Here we have `base_line`.
+        // If "baseline should be added to the y", maybe:
+        // glyph_y = y + metrics.base_line?
+        
+        let glyph_x = (current_x as isize + metrics.left_side_bearing) as usize;
+        let glyph_y = (baseline_y as isize + metrics.base_line) as usize;
+        
+        // Safety check for negative coords handled by cast to usize (will wrap to huge number)
+        // We'll check bounds in the loop.
+
+        for row in 0..metrics.height {
+            let dest_y = glyph_y + row;
+            if dest_y >= buffer.len() / buffer_width { continue; }
+            
+            for col in 0..metrics.width {
+                let dest_x = glyph_x + col;
+                if dest_x >= buffer_width { continue; }
+                
+                let alpha = bitmap[row * metrics.width + col];
+                if alpha > 0 {
+                    let mut pixel_color = color;
+                    // Apply alpha blending from font
+                    pixel_color.a = ((pixel_color.a as u16 * alpha as u16) / 255) as u8;
+                    draw_pixel(buffer, buffer_width, dest_x, dest_y, pixel_color);
+                }
+            }
+        }
+        
+        current_x += metrics.advance_width;
+    }
+}
 
 pub fn draw_line(buffer: &mut [u32], width0: usize, x0: usize, y0: usize, x1: usize, y1: usize, color: Color, width: usize) {
     let dx = (x1 as isize - x0 as isize).abs();

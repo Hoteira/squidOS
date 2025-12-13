@@ -30,6 +30,17 @@ impl File {
             Ok(res as usize)
         }
     }
+
+    pub fn size(&self) -> usize {
+        unsafe {
+            let res = syscall(65, self.fd as u64, 0, 0);
+            if res == u64::MAX {
+                0
+            } else {
+                res as usize
+            }
+        }
+    }
 }
 
 impl Drop for File {

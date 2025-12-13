@@ -236,6 +236,15 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
              }
         }
 
+        65 => { // SYS_FILE_SIZE
+             let fd = context.rdi as usize;
+             if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                  context.rax = handle.node.size();
+             } else {
+                 context.rax = u64::MAX;
+             }
+        }
+
         53 => { // SYS_GET_MOUSE_POS
             unsafe {
                 let mouse = &*(&raw const crate::composer::MOUSE);

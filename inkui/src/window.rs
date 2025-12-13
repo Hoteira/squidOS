@@ -15,18 +15,20 @@ pub struct FrameBuffer {
 
 impl FrameBuffer {
     pub fn new(size: usize) -> Self {
-        let address = graphics::malloc(size) as *mut u32;
+        let address = std::memory::malloc(size) as *mut u32;
         Self { address, size }
     }
 
     pub fn resize(&mut self, size: usize) {
         if self.size < size {
-            let new_addr = graphics::malloc(size) as *mut u32;
+            let new_addr = std::memory::malloc(size) as *mut u32;
             self.address = new_addr;
             self.size = size;
         }
     }
 }
+
+use titanf::TrueTypeFont;
 
 pub struct Window {
     pub id: usize,
@@ -48,6 +50,10 @@ pub struct Window {
 
     pub w_type: Items,
     pub focus: WidgetId,
+
+    // Font support
+    // We store the data as a static slice (leaked) to satisfy TrueTypeFont lifetime
+    pub font: Option<TrueTypeFont>,
 }
 
 impl Window {
@@ -70,7 +76,14 @@ impl Window {
             min_height: 0,
             w_type: Items::Window,
             focus: 0,
+            font: None,
         }
+    }
+
+    pub fn load_font(&mut self, data: &'static [u8]) {
+         if let Ok(font) = TrueTypeFont::load_font(data) {
+             self.font = Some(font);
+         }
     }
 
     pub fn show(&mut self) {
@@ -114,7 +127,7 @@ impl Window {
         };
         
         for child in &mut self.children {
-            draw_recursive(buffer, self.width, child, 0, 0, self.width, self.height, 0, 0);
+            draw_recursive(buffer, self.width, child, 0, 0, self.width, self.height, 0, 0, &mut self.font);
         }
     }
 
@@ -250,10 +263,11 @@ pub fn draw_recursive(
     parent_height: usize,
     parent_padding: usize,
     _parent_margin: usize,
+    font: &mut Option<TrueTypeFont>,
 ) {
 
     widget.update_layout(parent_x, parent_y, parent_width, parent_height, parent_padding, _parent_margin, &Display::None);
-    widget.draw(buffer, width0);
+    widget.draw(buffer, width0, font);
 
     let widget_x = widget.get_x();
     let widget_y = widget.get_y();
@@ -317,7 +331,7 @@ pub fn draw_recursive(
                             (x, y, w, h)
                         }
                     };
-                    draw_recursive(buffer, width0, child, child_x, child_y, child_w, child_h, 0, widget_margin);
+                    draw_recursive(buffer, width0, child, child_x, child_y, child_w, child_h, 0, widget_margin, font);
                 }
             },
             Display::Grid { rows, cols } => {
@@ -333,7 +347,7 @@ pub fn draw_recursive(
                         if row >= rows { break; }
                         let child_x = widget_x + widget_padding + col * cell_width;
                         let child_y = widget_y + widget_padding + row * cell_height;
-                        draw_recursive(buffer, width0, child, child_x, child_y, cell_width, cell_height, 0, widget_margin);
+                        draw_recursive(buffer, width0, child, child_x, child_y, cell_width, cell_height, 0, widget_margin, font);
                     }
                 }
             },

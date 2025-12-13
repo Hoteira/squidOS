@@ -90,16 +90,6 @@ pub fn get_screen_height() -> usize {
     unsafe { syscall(45, 0, 0, 0) as usize }
 }
 
-pub fn malloc(size: usize) -> usize {
-    unsafe { syscall(5, size as u64, 0, 0) as usize }
-}
-
-pub fn free(base: usize, pid: u64) {
-    let main_pid = (pid >> 32);
-    let child_pid = pid & 0xFFFFFFFF;
-    unsafe { syscall(6, base as u64, main_pid, child_pid); }
-}
-
 pub fn get_mouse_pos() -> (usize, usize) {
     let res = unsafe { syscall(53, 0, 0, 0) };
     let x = (res >> 32) as usize;

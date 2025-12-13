@@ -156,7 +156,7 @@ impl Widget {
             background_color: Color::rgb(100, 100, 100),
         }
     }
-    
+
     // Fluent API
     pub fn width(mut self, width: Size) -> Self {
         self.geometry_mut().user_width = width;
@@ -229,7 +229,7 @@ impl Widget {
         }
         self
     }
-    
+
     pub fn set_text_align(mut self, align: Align) -> Self {
         match &mut self {
             Widget::Button { text, .. } |
@@ -446,10 +446,10 @@ impl Widget {
                             let row = i / *cols;
                             let col = i % *cols;
                             if row >= *rows { break; }
-                            
+
                             let child_parent_x = widget_x + widget_padding + col * cell_width;
                             let child_parent_y = widget_y + widget_padding + row * cell_height;
-                            
+
                             child.update_layout(child_parent_x, child_parent_y, cell_width, cell_height, 0, _widget_margin, &Display::None);
                         }
                     },
@@ -482,9 +482,9 @@ impl Widget {
                                     let child_y = content_y + current_y;
                                     let avail_w = (content_width - current_x).min(child_total_w);
                                     let avail_h = content_height.saturating_sub(current_y);
-                                    
+
                                     child.update_layout(child_x, child_y, avail_w, avail_h.min(child_total_h), 0, _widget_margin, &Display::None);
-                                    
+
                                     current_x += child_total_w;
                                     line_height = line_height.max(child_total_h);
                                 },
@@ -498,9 +498,9 @@ impl Widget {
                                     let child_y = content_y + current_y;
                                     let avail_w = content_width.saturating_sub(current_x);
                                     let avail_h = (content_height - current_y).min(child_total_h);
-                                    
+
                                     child.update_layout(child_x, child_y, avail_w.min(child_total_w), avail_h, 0, _widget_margin, &Display::None);
-                                    
+
                                     current_y += child_total_h;
                                     line_width = line_width.max(child_total_w);
                                 }
@@ -524,8 +524,13 @@ impl Widget {
             _ => {}
         }
     }
+}
 
-    pub fn draw(&self, framebuffer: &mut [u32], buffer_width: usize) {
+use titanf::TrueTypeFont;
+
+impl Widget {
+    // ... existing methods ...
+    pub fn draw(&self, framebuffer: &mut [u32], buffer_width: usize, font: &mut Option<TrueTypeFont>) {
         if buffer_width == 0 { return; }
         
         let geometry = self.geometry();
@@ -543,7 +548,7 @@ impl Widget {
                     *background_color
                 );
             },
-            Widget::Button { background_color, .. } => {
+            Widget::Button { background_color, text, .. } => {
                 crate::graphics::primitives::draw_square(
                     framebuffer,
                     buffer_width,
@@ -554,9 +559,23 @@ impl Widget {
                     geometry.border_radius,
                     *background_color
                 );
-                // Text drawing removed
+                
+                if let Some(font) = font {
+                    if !text.text.is_empty() {
+                         crate::graphics::primitives::draw_text(
+                            framebuffer,
+                            buffer_width,
+                            geometry.x + geometry.margin + geometry.padding + 5, // Simple padding
+                            geometry.y + geometry.margin + geometry.padding + 5,
+                            &text.text,
+                            font,
+                            text.size as f32,
+                            text.color
+                        );
+                    }
+                }
             },
-            Widget::Label { background_color, .. } => {
+            Widget::Label { background_color, text, .. } => {
                 if background_color.a > 0 {
                     crate::graphics::primitives::draw_square(
                         framebuffer,
@@ -569,7 +588,21 @@ impl Widget {
                         *background_color
                     );
                 }
-                // Text drawing removed
+                
+                if let Some(font) = font {
+                    if !text.text.is_empty() {
+                         crate::graphics::primitives::draw_text(
+                            framebuffer,
+                            buffer_width,
+                            geometry.x + geometry.margin + geometry.padding,
+                            geometry.y + geometry.margin + geometry.padding,
+                            &text.text,
+                            font,
+                            text.size as f32,
+                            text.color
+                        );
+                    }
+                }
             },
             Widget::Canvas { framebuffer: widget_buffer, .. } => {
                 if !widget_buffer.is_empty() {
