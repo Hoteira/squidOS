@@ -8,7 +8,7 @@ pub static mut MOUSE_IDX: usize = 0;
 pub static mut MOUSE_PACKET_SIZE: usize = 3; 
 
 const O: u32 = 0x0000_0000;
-const B: u32 = 0x0000_00FF;
+const B: u32 = 0xFF00_0000;
 const T: u32 = 0xFFFF_FFFF;
 
 pub const CURSOR_BUFFER: [u32; 1024] = [

@@ -256,3 +256,350 @@ pub unsafe fn flush(x: u32, y: u32, width: u32, height: u32, screen_width: u32) 
         core::mem::size_of_val(&resp_flush) as u32,
     );
 }
+
+pub unsafe fn setup_cursor(width: u32, height: u32, phys_buffer: u64, hot_x: u32, hot_y: u32) {
+    // 1. Create Cursor Resource (ID 2)
+    let req_create = VirtioGpuResourceCreate2d {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        resource_id: 2, // ID 2 for Cursor
+        format: 1,      // B8G8R8A8
+        width,
+        height,
+    };
+    let mut resp_create: VirtioGpuCtrlHeader = core::mem::zeroed();
+    
+    send_command_simple(
+        &req_create as *const _ as u64,
+        core::mem::size_of_val(&req_create) as u32,
+        &resp_create as *const _ as u64,
+        core::mem::size_of_val(&resp_create) as u32,
+    );
+    println!("VirtIO Cursor Create: {:#x}", resp_create.type_);
+
+    // 2. Attach Backing
+    #[repr(C)]
+    struct AttachRequest {
+        hdr: VirtioGpuResourceAttachBacking,
+        entry: VirtioGpuMemEntry,
+    }
+
+    let req_attach = AttachRequest {
+        hdr: VirtioGpuResourceAttachBacking {
+            hdr: VirtioGpuCtrlHeader {
+                type_: VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING,
+                flags: 0,
+                fence_id: 0,
+                ctx_id: 0,
+                padding: 0,
+            },
+            resource_id: 2,
+            nr_entries: 1,
+        },
+        entry: VirtioGpuMemEntry {
+            addr: phys_buffer,
+            length: width * height * 4,
+            padding: 0,
+        },
+    };
+    let mut resp_attach: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_attach as *const _ as u64,
+        core::mem::size_of_val(&req_attach) as u32,
+        &resp_attach as *const _ as u64,
+        core::mem::size_of_val(&resp_attach) as u32,
+    );
+    println!("VirtIO Cursor Attach: {:#x}", resp_attach.type_);
+
+    // 3. Transfer Data (Upload)
+    let req_transfer = VirtioGpuTransferToHost2d {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        r: VirtioGpuRect { x: 0, y: 0, width, height },
+        offset: 0,
+        resource_id: 2,
+        padding: 0,
+    };
+    let mut resp_transfer: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_transfer as *const _ as u64,
+        core::mem::size_of_val(&req_transfer) as u32,
+        &resp_transfer as *const _ as u64,
+        core::mem::size_of_val(&resp_transfer) as u32,
+    );
+    println!("VirtIO Cursor Transfer: {:#x}", resp_transfer.type_);
+
+    // 3.5. Flush Cursor Resource
+    let req_flush = VirtioGpuResourceFlush {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_RESOURCE_FLUSH,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        r: VirtioGpuRect { x: 0, y: 0, width, height },
+        resource_id: 2,
+        padding: 0,
+    };
+    let mut resp_flush: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_flush as *const _ as u64,
+        core::mem::size_of_val(&req_flush) as u32,
+        &resp_flush as *const _ as u64,
+        core::mem::size_of_val(&resp_flush) as u32,
+    );
+    println!("VirtIO Cursor Flush: {:#x}", resp_flush.type_);
+
+    // 4. Update Cursor (Enable it)
+    let req_update = VirtioGpuUpdateCursor {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_UPDATE_CURSOR,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        pos: VirtioGpuCursorPos {
+            scanout_id: 0,
+            x: 500,
+            y: 500,
+            padding: 0,
+        },
+        resource_id: 2,
+        hot_x,
+        hot_y,
+        padding: 0,
+    };
+    let mut resp_update: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_update as *const _ as u64,
+        core::mem::size_of_val(&req_update) as u32,
+        &resp_update as *const _ as u64,
+        core::mem::size_of_val(&resp_update) as u32,
+    );
+    println!("VirtIO Cursor Update: {:#x}", resp_update.type_);
+    
+    println!("VirtIO GPU: Hardware Cursor setup complete.");
+}
+
+pub unsafe fn test_cursor(width: u32, height: u32, phys_buffer: u64) {
+    println!("VirtIO Debug: Starting Cursor Test...");
+
+    // 1. Create
+    let req_create = VirtioGpuResourceCreate2d {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        resource_id: 2,
+        format: 1, // B8G8R8A8
+        width,
+        height,
+    };
+    let mut resp_create: VirtioGpuCtrlHeader = core::mem::zeroed();
+    
+    send_command_simple(
+        &req_create as *const _ as u64,
+        core::mem::size_of_val(&req_create) as u32,
+        &resp_create as *const _ as u64,
+        core::mem::size_of_val(&resp_create) as u32,
+    );
+    println!("VirtIO Debug: Create(ID=2) -> {:#x}", resp_create.type_);
+
+    // 2. Attach
+    #[repr(C)]
+    struct AttachRequest {
+        hdr: VirtioGpuResourceAttachBacking,
+        entry: VirtioGpuMemEntry,
+    }
+
+    let req_attach = AttachRequest {
+        hdr: VirtioGpuResourceAttachBacking {
+            hdr: VirtioGpuCtrlHeader {
+                type_: VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING,
+                flags: 0,
+                fence_id: 0,
+                ctx_id: 0,
+                padding: 0,
+            },
+            resource_id: 2,
+            nr_entries: 1,
+        },
+        entry: VirtioGpuMemEntry {
+            addr: phys_buffer,
+            length: width * height * 4,
+            padding: 0,
+        },
+    };
+    let mut resp_attach: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_attach as *const _ as u64,
+        core::mem::size_of_val(&req_attach) as u32,
+        &resp_attach as *const _ as u64,
+        core::mem::size_of_val(&resp_attach) as u32,
+    );
+    println!("VirtIO Debug: Attach(Addr={:#x}) -> {:#x}", phys_buffer, resp_attach.type_);
+
+    // 3. Transfer (Upload)
+    let req_transfer = VirtioGpuTransferToHost2d {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        r: VirtioGpuRect { x: 0, y: 0, width, height },
+        offset: 0,
+        resource_id: 2,
+        padding: 0,
+    };
+    let mut resp_transfer: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_transfer as *const _ as u64,
+        core::mem::size_of_val(&req_transfer) as u32,
+        &resp_transfer as *const _ as u64,
+        core::mem::size_of_val(&resp_transfer) as u32,
+    );
+    println!("VirtIO Debug: Transfer -> {:#x}", resp_transfer.type_);
+    
+    println!("VirtIO Debug: UpdateCursor Struct Size: {}", core::mem::size_of::<VirtioGpuUpdateCursor>());
+
+    // TEST 0: Move Cursor (0x0301) - Should verify struct layout
+    let req_move = VirtioGpuUpdateCursor {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_MOVE_CURSOR,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        pos: VirtioGpuCursorPos {
+            scanout_id: 0,
+            x: 100,
+            y: 100,
+            padding: 0,
+        },
+        resource_id: 0,
+        hot_x: 0,
+        hot_y: 0,
+        padding: 0,
+    };
+    let mut resp_move: VirtioGpuCtrlHeader = core::mem::zeroed();
+    send_command_simple(
+        &req_move as *const _ as u64,
+        core::mem::size_of_val(&req_move) as u32,
+        &resp_move as *const _ as u64,
+        core::mem::size_of_val(&resp_move) as u32,
+    );
+    println!("VirtIO Debug: Move(0x0301) -> {:#x}", resp_move.type_);
+
+    // TEST 1: Disable Cursor (Resource ID 0)
+    let req_disable = VirtioGpuUpdateCursor {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_UPDATE_CURSOR,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        pos: VirtioGpuCursorPos {
+            scanout_id: 0,
+            x: 0,
+            y: 0,
+            padding: 0,
+        },
+        resource_id: 0, // Disable
+        hot_x: 0,
+        hot_y: 0,
+        padding: 0,
+    };
+    let mut resp_disable: VirtioGpuCtrlHeader = core::mem::zeroed();
+    send_command_simple(
+        &req_disable as *const _ as u64,
+        core::mem::size_of_val(&req_disable) as u32,
+        &resp_disable as *const _ as u64,
+        core::mem::size_of_val(&resp_disable) as u32,
+    );
+    println!("VirtIO Debug: Disable(ID=0) -> {:#x}", resp_disable.type_);
+
+    // TEST 2: Enable Cursor (Resource ID 2)
+    let req_update = VirtioGpuUpdateCursor {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_UPDATE_CURSOR,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        pos: VirtioGpuCursorPos {
+            scanout_id: 0,
+            x: 500,
+            y: 500,
+            padding: 0,
+        },
+        resource_id: 2,
+        hot_x: 0,
+        hot_y: 0,
+        padding: 0,
+    };
+    let mut resp_update: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_update as *const _ as u64,
+        core::mem::size_of_val(&req_update) as u32,
+        &resp_update as *const _ as u64,
+        core::mem::size_of_val(&resp_update) as u32,
+    );
+    println!("VirtIO Debug: Update(ID=2, Pos=500,500) -> {:#x}", resp_update.type_);
+}
+
+pub unsafe fn move_cursor(x: u32, y: u32) {
+    let req_move = VirtioGpuUpdateCursor {
+        hdr: VirtioGpuCtrlHeader {
+            type_: VIRTIO_GPU_CMD_MOVE_CURSOR,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            padding: 0,
+        },
+        pos: VirtioGpuCursorPos {
+            scanout_id: 0,
+            x,
+            y,
+            padding: 0,
+        },
+        resource_id: 0, // Not used for move
+        hot_x: 0,
+        hot_y: 0,
+        padding: 0,
+    };
+    let mut resp_move: VirtioGpuCtrlHeader = core::mem::zeroed();
+
+    send_command_simple(
+        &req_move as *const _ as u64,
+        core::mem::size_of_val(&req_move) as u32,
+        &resp_move as *const _ as u64,
+        core::mem::size_of_val(&resp_move) as u32,
+    );
+}

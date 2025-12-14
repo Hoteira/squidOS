@@ -88,6 +88,26 @@ pub struct VirtioGpuRespDisplayInfo {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
+pub struct VirtioGpuCursorPos {
+    pub scanout_id: u32,
+    pub x: u32,
+    pub y: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct VirtioGpuUpdateCursor {
+    pub hdr: VirtioGpuCtrlHeader,
+    pub pos: VirtioGpuCursorPos,
+    pub resource_id: u32,
+    pub hot_x: u32,
+    pub hot_y: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct VirtioGpuDisplayOne {
     pub r: VirtioGpuRect,
     pub enabled: u32,
