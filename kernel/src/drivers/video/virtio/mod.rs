@@ -20,7 +20,7 @@ pub fn init() {
         println!("VirtIO GPU: Device not found.");
         return;
     }
-    
+
     let virtio = virtio_opt.unwrap();
     println!("VirtIO GPU: Found device at Bus {}, Device {}, Func {}", virtio.bus, virtio.device, virtio.function);
 
@@ -32,11 +32,11 @@ pub fn init() {
 
     let caps = virtio.list_capabilities();
     let virtio_caps = parse_virtio_caps(&virtio, &caps);
-    
+
     let mut common_cfg_ptr: *mut u8 = core::ptr::null_mut();
     let mut notify_base: u64 = 0;
     let mut notify_multiplier: u32 = 0;
-    
+
     for cap in virtio_caps {
         if cap.cfg_type == VIRTIO_CAP_COMMON {
             if let Some(bar_base) = virtio.get_bar(cap.bar) {
@@ -48,7 +48,7 @@ pub fn init() {
         } else if cap.cfg_type == VIRTIO_CAP_NOTIFY {
              if let Some(bar_base) = virtio.get_bar(cap.bar) {
                  notify_base = (bar_base as u64) + (cap.offset as u64);
-                 notify_multiplier = virtio.read_capability_data(cap.offset as u8, 16); 
+                 notify_multiplier = virtio.read_capability_data(cap.offset as u8, 16);
              }
         }
     }
@@ -60,7 +60,7 @@ pub fn init() {
 
     unsafe {
         write_common_u8(common_cfg_ptr, OFF_DEVICE_STATUS, 0);
-        
+
         let mut status = read_common_u8(common_cfg_ptr, OFF_DEVICE_STATUS);
         status |= STATUS_ACKNOWLEDGE;
         write_common_u8(common_cfg_ptr, OFF_DEVICE_STATUS, status);
@@ -91,7 +91,7 @@ pub fn parse_virtio_caps(pci_device: &PciDevice, caps: &[PciCapability]) -> Vec<
     let mut virtio_caps = Vec::new();
 
     for cap in caps.iter() {
-        if cap.id != 0x09 { 
+        if cap.id != 0x09 {
             continue;
         }
 
@@ -115,14 +115,14 @@ pub unsafe fn start_gpu(width: u32, height: u32, phys_buffer: u64) {
         padding: 0,
     };
     let mut resp_info: VirtioGpuRespDisplayInfo = core::mem::zeroed();
-    
+
     send_command_simple(
         &req_info as *const _ as u64,
         core::mem::size_of_val(&req_info) as u32,
         &resp_info as *const _ as u64,
         core::mem::size_of_val(&resp_info) as u32,
     );
-    
+
     println!("VirtIO GPU: Display Info Type: {:#x}", resp_info.hdr.type_);
 
     let req_create = VirtioGpuResourceCreate2d {
@@ -134,7 +134,7 @@ pub unsafe fn start_gpu(width: u32, height: u32, phys_buffer: u64) {
             padding: 0,
         },
         resource_id: 1,
-        format: 1, 
+        format: 1,
         width,
         height,
     };
@@ -155,7 +155,7 @@ pub unsafe fn start_gpu(width: u32, height: u32, phys_buffer: u64) {
         hdr: VirtioGpuResourceAttachBacking,
         entry: VirtioGpuMemEntry,
     }
-    
+
     let req_attach = AttachRequest {
         hdr: VirtioGpuResourceAttachBacking {
             hdr: VirtioGpuCtrlHeader {
@@ -206,7 +206,7 @@ pub unsafe fn start_gpu(width: u32, height: u32, phys_buffer: u64) {
         core::mem::size_of_val(&resp_scanout) as u32,
     );
     println!("VirtIO GPU: Set Scanout Resp: {:#x}", resp_scanout.type_);
-    
+
     println!("VirtIO GPU: Started. Scanout set to Resource 1.");
 }
 

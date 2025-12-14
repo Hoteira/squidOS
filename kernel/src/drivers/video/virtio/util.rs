@@ -27,3 +27,7 @@ pub unsafe fn read_common_u32(base: *mut u8, offset: usize) -> u32 {
 pub unsafe fn write_common_u64(base: *mut u8, offset: usize, value: u64) {
     write_volatile(base.add(offset) as *mut u64, value);
 }
+
+pub unsafe fn read_common_u64(base: *mut u8, offset: usize) -> u64 {
+    read_volatile(base.add(offset) as *mut u64)
+}
