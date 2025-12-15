@@ -61,10 +61,29 @@ pub unsafe fn setup_queue(common_cfg: *mut u8, index: u16, notify_base: u64, not
     }
 }
 
-pub unsafe fn send_command(queue_idx: usize, req_phys: u64, req_len: u32, resp_phys: u64, resp_len: u32) {
+pub unsafe fn send_command_simple(req_phys: u64, req_len: u32, resp_phys: u64, resp_len: u32) -> bool {
+    send_command_queue(0, req_phys, req_len, resp_phys, resp_len)
+}
+
+pub unsafe fn send_cursor_command(req_phys: u64, req_len: u32, resp_phys: u64, resp_len: u32) -> bool {
+    if VIRT_QUEUES[1].is_some() {
+        send_command_queue(1, req_phys, req_len, resp_phys, resp_len)
+    } else {
+        // Fallback to Control Queue if Cursor Queue not available
+        send_command_queue(0, req_phys, req_len, resp_phys, resp_len)
+    }
+}
+
+unsafe fn send_command_queue(queue_idx: usize, req_phys: u64, req_len: u32, resp_phys: u64, resp_len: u32) -> bool {
+    let int_enabled = crate::interrupts::idt::interrupts();
+    if int_enabled { core::arch::asm!("cli"); }
+
     let vq = match &mut VIRT_QUEUES[queue_idx] { 
         Some(v) => v,
-        None => return,
+        None => {
+            if int_enabled { core::arch::asm!("sti"); }
+            return false;
+        }
     };
 
     let head_idx = vq.free_head % vq.num;
@@ -98,12 +117,27 @@ pub unsafe fn send_command(queue_idx: usize, req_phys: u64, req_len: u32, resp_p
     write_volatile(vq.notify_addr as *mut u16, vq.queue_index);
 
     let used_ptr = vq.used_phys as *mut VirtqUsed;
+    let mut timeout = 10_000_000;
+    let mut success = false;
+
     loop {
         let used_idx = read_volatile(core::ptr::addr_of!((*used_ptr).idx));
         if used_idx != vq.last_used_idx {
             vq.last_used_idx = vq.last_used_idx.wrapping_add(1);
+            success = true;
             break;
         }
         core::hint::spin_loop();
+        timeout -= 1;
+        if timeout == 0 {
+            break;
+        }
     }
+
+    if int_enabled { core::arch::asm!("sti"); }
+    
+    if !success {
+        crate::debugln!("VirtIO GPU: Queue {} Timed Out!", queue_idx);
+    }
+    success
 }

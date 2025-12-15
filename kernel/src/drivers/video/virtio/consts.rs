@@ -31,6 +31,9 @@ pub const STATUS_FEATURES_OK: u8 = 8;
 pub const STATUS_DEVICE_NEEDS_RESET: u8 = 64;
 pub const STATUS_FAILED: u8 = 128;
 
+// Feature Bits
+pub const VIRTIO_F_VERSION_1: u64 = 1 << 32;
+
 // GPU Command Types
 pub const VIRTIO_GPU_CMD_GET_DISPLAY_INFO: u32 = 0x0100;
 pub const VIRTIO_GPU_CMD_RESOURCE_CREATE_2D: u32 = 0x0101;

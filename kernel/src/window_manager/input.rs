@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicU16, Ordering};
 use crate::debugln;
 use crate::drivers::video::virtio;
-use crate::window_manager::display::{DISPLAY_SERVER, VIRTIO_ACTIVE, Color, State, Mouse as DisplayMouse}; 
+use crate::window_manager::display::{DISPLAY_SERVER, VIRTIO_ACTIVE, VIRTIO_CURSOR_ACTIVE, Color, State, Mouse as DisplayMouse}; 
 use super::composer::{COMPOSER, Composer};
 use super::events::{Event, MouseEvent, ResizeEvent, GLOBAL_EVENT_QUEUE};
 use super::window::{Items, Window};
@@ -144,7 +144,9 @@ impl Mouse {
 
                     // Clear and restore the old cursor area from DB
                     // Note: copy_to_fb now in display_server
-                    display_server.copy_to_fb(old_x as u32, old_y as u32, 32, 32);
+                    if !VIRTIO_CURSOR_ACTIVE {
+                        display_server.copy_to_fb(old_x as u32, old_y as u32, 32, 32);
+                    }
 
                     // Copy window from DB to FB
                     display_server.copy_to_fb(win_x as u32, win_y as u32, win_width as u32, win_height as u32);
@@ -155,7 +157,11 @@ impl Mouse {
                     }
 
                     // Draw cursor at new position
-                    display_server.draw_mouse(self.x, self.y, false);
+                    if VIRTIO_CURSOR_ACTIVE {
+                        virtio::move_cursor(self.x as u32, self.y as u32);
+                    } else {
+                        display_server.draw_mouse(self.x, self.y, false);
+                    }
 
                     (*(&raw mut DRAGGING_WINDOW)).store(0, Ordering::Relaxed);
                     (*(&raw mut RESIZING_WINDOW)).store(0, Ordering::Relaxed);
@@ -198,7 +204,17 @@ impl Mouse {
                 Color::rgb(245, 245, 247)
             );
 
-            unsafe { (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y, false) };
+            unsafe {
+                if VIRTIO_ACTIVE {
+                    virtio::flush(w.x as u32, w.y as u32, W_WIDTH as u32, W_HEIGHT as u32, (*(&raw mut DISPLAY_SERVER)).width as u32);
+                }
+                
+                if VIRTIO_CURSOR_ACTIVE {
+                    virtio::move_cursor(self.x as u32, self.y as u32);
+                } else {
+                    (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y, false);
+                }
+            }
             return;
 
         // Handle active drag - window being moved
@@ -364,15 +380,23 @@ impl Mouse {
             }
 
             // Draw cursor at new position
-            // PASSING TRUE because we are dragging a window!
-            display_server.draw_mouse(self.x, self.y, true);
+            unsafe {
+                if VIRTIO_ACTIVE {
+                    virtio::move_cursor(self.x as u32, self.y as u32);
+                } else {
+                    // PASSING TRUE because we are dragging a window!
+                    display_server.draw_mouse(self.x, self.y, true);
+                }
+            }
             return;
         }
 
         // Normal case (not dragging) - erase old cursor by copying from DB to FB
         unsafe {
             let display_server = &mut *(&raw mut DISPLAY_SERVER);
-            display_server.copy_to_fb(old_x as u32, old_y as u32, 32, 32);
+            if !VIRTIO_CURSOR_ACTIVE {
+                display_server.copy_to_fb(old_x as u32, old_y as u32, 32, 32);
+            }
         };
 
         // Handle window interaction
@@ -441,7 +465,13 @@ impl Mouse {
             }
 
             if handled_drag {
-                unsafe { (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y, false) };
+                unsafe {
+                    if VIRTIO_CURSOR_ACTIVE {
+                        virtio::move_cursor(self.x as u32, self.y as u32);
+                    } else {
+                        (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y, false);
+                    }
+                }
                 return;
             }
 
@@ -464,7 +494,7 @@ impl Mouse {
 
         // Draw mouse cursor at new position
         unsafe {
-            if VIRTIO_ACTIVE {
+            if VIRTIO_CURSOR_ACTIVE {
                 // Use hardware cursor if available!
                 virtio::move_cursor(self.x as u32, self.y as u32);
             } else {

@@ -24,6 +24,7 @@ pub static mut DISPLAY_SERVER: DisplayServer = DisplayServer {
 };
 
 pub static mut VIRTIO_ACTIVE: bool = false;
+pub static mut VIRTIO_CURSOR_ACTIVE: bool = false;
 
 impl DisplayServer {
     pub fn init(&mut self) {
@@ -78,7 +79,7 @@ impl DisplayServer {
                     }
                 }
 
-                virtio::setup_cursor(
+                let cursor_ok = virtio::setup_cursor(
                     64, // Width
                     64, // Height
                     cursor_phys_addr as u64,
@@ -86,7 +87,13 @@ impl DisplayServer {
                     0   // hot_y
                 );
 
-                println!("DisplayServer: Hardware cursor initialized");
+                if cursor_ok {
+                    println!("DisplayServer: Hardware cursor initialized");
+                    VIRTIO_CURSOR_ACTIVE = true;
+                } else {
+                    println!("DisplayServer: Hardware cursor failed (using software fallback)");
+                    VIRTIO_CURSOR_ACTIVE = false;
+                }
 
                 VIRTIO_ACTIVE = true;
 

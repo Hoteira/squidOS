@@ -1,0 +1,488 @@
+# VirtIO GPU Hardware Cursor: QEMU-Accurate Implementation
+
+## Overview & Architecture
+The VirtIO GPU cursor is implemented as a separate plane managed by the GPU device. QEMU's implementation (hw/display/virtio-gpu.c) uses the `VIRTIO_GPU_CMD_UPDATE_CURSOR` command with immediate data transfer, bypassing resource management for the cursor.
+
+## Critical Implementation Details (QEMU-Specific)
+
+1. **Cursor is a separate plane**: Not part of the framebuffer, drawn by display hardware
+2. **Immediate data in UPDATE_CURSOR**: QEMU accepts cursor data directly in the command
+3. **Legacy vs Modern Mode**: QEMU supports both V1 and V2 cursor protocols
+4. **No resource required**: Unlike regular GPU resources, cursor doesn't need resource creation
+
+## QEMU Data Structures (From Source)
+
+```pseudocode
+// From include/hw/virtio/virtio-gpu.h
+
+// Cursor update command with inline data (QEMU extension)
+struct virtio_gpu_update_cursor {
+    struct virtio_gpu_ctrl_hdr hdr;
+    le32 resource_id;          // 0 = hide cursor, non-zero = show
+    le32 hot_x;                // Hotspot X
+    le32 hot_y;                // Hotspot Y
+    le32 padding;              // Must be 0
+    
+    // In QEMU: If VIRTIO_GPU_F_CURSOR_POS_UPDATE is NOT negotiated,
+    // the cursor image data follows immediately here
+    // u8 cursor_data[width * height * 4];  // ARGB format
+}
+
+// QEMU's internal cursor state (simplified)
+struct virtio_gpu_cursor {
+    uint32_t width;           // Current cursor width (max 256 in QEMU)
+    uint32_t height;          // Current cursor height (max 256 in QEMU)
+    uint32_t hot_x;           // Current hotspot X
+    uint32_t hot_y;           // Current hotspot Y
+    uint32_t pos_x;           // Current screen X
+    uint32_t pos_y;           // Current screen Y
+    bool visible;             // Is cursor visible?
+    
+    // Cursor pixman image (QEMU internal)
+    pixman_image_t *image;    // ARGB format image
+    
+    // For VIRTIO_GPU_F_CURSOR_POS_UPDATE feature
+    bool pos_update;          // Supports separate position updates
+}
+```
+
+## Feature Flags (From QEMU/virtio-gpu spec)
+
+```pseudocode
+// Feature bits in device configuration
+VIRTIO_GPU_F_VIRGL = 0       // Virgl 3D support
+VIRTIO_GPU_F_EDID = 1        // EDID support
+VIRTIO_GPU_F_CURSOR_POS_UPDATE = 2  // Separate cursor position updates
+VIRTIO_GPU_F_RESOURCE_UUID = 3      // Resource UUID
+VIRTIO_GPU_F_RESOURCE_BLOB = 4      // Resource blob
+VIRTIO_GPU_F_CONTEXT_INIT = 5       // Context initialization
+
+// If VIRTIO_GPU_F_CURSOR_POS_UPDATE is negotiated:
+// - Cursor position can be updated without sending image data
+// - Image data must be sent at least once before positioning
+```
+
+## QEMU's Cursor Handling Flow
+
+### 1. Initialization (Device Start)
+
+```pseudocode
+// From hw/display/virtio-gpu.c
+function virtio_gpu_device_realize(dev):
+    // Initialize cursor state
+    g->cursor = allocate(sizeof(virtio_gpu_cursor))
+    g->cursor->width = 0
+    g->cursor->height = 0
+    g->cursor->hot_x = 0
+    g->cursor->hot_y = 0
+    g->cursor->pos_x = 0
+    g->cursor->pos_y = 0
+    g->cursor->visible = false
+    g->cursor->image = NULL
+    g->cursor->pos_update = false  // Set during feature negotiation
+    
+    // Set up command handlers
+    g->cmd_handlers[VIRTIO_GPU_CMD_UPDATE_CURSOR] = handle_update_cursor
+
+// Feature negotiation
+function virtio_gpu_set_features(vdev, features):
+    if (features & (1 << VIRTIO_GPU_F_CURSOR_POS_UPDATE)):
+        g->cursor->pos_update = true
+    else:
+        g->cursor->pos_update = false
+```
+
+### 2. UPDATE_CURSOR Command Handler (Exact QEMU Logic)
+
+```pseudocode
+// From hw/display/virtio-gpu.c::virtio_gpu_update_cursor()
+function handle_update_cursor(g, cmd):
+    cursor_cmd = (struct virtio_gpu_update_cursor *)cmd
+    
+    // Extract fields (note: QEMU uses little-endian)
+    resource_id = le32_to_cpu(cursor_cmd->resource_id)
+    hot_x = le32_to_cpu(cursor_cmd->hot_x)
+    hot_y = le32_to_cpu(cursor_cmd->hot_y)
+    pos_x = le32_to_cpu(cursor_cmd->pos_x)  // Actually from separate field
+    pos_y = le32_to_cpu(cursor_cmd->pos_y)  // Actually from separate field
+    
+    // QEMU bug/feature: The struct in the spec doesn't have pos_x/pos_y
+    // They're actually part of the data payload. QEMU reads them from
+    // the data section following the header.
+    
+    // In QEMU, the actual implementation reads:
+    // pos_x = ldl_le_p(cursor_cmd + offsetof(data, pos_x))
+    // pos_y = ldl_le_p(cursor_cmd + offsetof(data, pos_y))
+    
+    if (resource_id == 0):
+        // Hide cursor
+        g->cursor->visible = false
+        update_display = true
+    else:
+        // Show cursor with image data
+        // The image data immediately follows the command struct
+        
+        // Calculate data position (QEMU actual code)
+        data_start = cmd + sizeof(struct virtio_gpu_update_cursor)
+        
+        // In QEMU, width and height are actually passed in the resource_id
+        // for cursor updates. This is a QEMU-specific interpretation!
+        width = (resource_id >> 16) & 0xFFFF
+        height = resource_id & 0xFFFF
+        
+        if (width == 0 || height == 0):
+            width = 64  // Default cursor size in QEMU
+            height = 64
+        
+        // Validate size (QEMU limits)
+        if (width > 256 || height > 256):
+            send_error_response(VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER)
+            return
+        
+        // Create or update pixman image (QEMU internal)
+        if (g->cursor->image == NULL):
+            // ARGB format, 32bpp
+            g->cursor->image = pixman_image_create_bits(
+                PIXMAN_a8r8g8b8,
+                width,
+                height,
+                NULL,  // Data will be set
+                width * 4  // stride
+            )
+        else if (pixman_image_get_width(g->cursor->image) != width ||
+                 pixman_image_get_height(g->cursor->image) != height):
+            // Resize existing image
+            pixman_image_unref(g->cursor->image)
+            g->cursor->image = pixman_image_create_bits(
+                PIXMAN_a8r8g8b8,
+                width,
+                height,
+                NULL,
+                width * 4
+            )
+        
+        // Copy cursor data (ARGB format, little-endian in memory)
+        dst = pixman_image_get_data(g->cursor->image)
+        src = data_start
+        
+        // QEMU does byte-by-byte copy for endianness conversion
+        for (i = 0; i < width * height; i++):
+            // Source is in guest memory order (could be LE or BE depending on guest)
+            // QEMU's pixman expects native-endian ARGB
+            
+            // Read as little-endian (guest is x86 usually)
+            b = src[0]
+            g = src[1]
+            r = src[2]
+            a = src[3]
+            
+            // Convert to pixman format (native-endian ARGB)
+            // On little-endian host: memory order is BGRA
+            // On big-endian host: memory order is ARGB
+            if (is_little_endian()):
+                dst[i] = (a << 24) | (r << 16) | (g << 8) | b
+            else:
+                dst[i] = (a << 24) | (b << 16) | (g << 8) | r
+            
+            src += 4
+        
+        // Update cursor state
+        g->cursor->width = width
+        g->cursor->height = height
+        g->cursor->hot_x = hot_x
+        g->cursor->hot_y = hot_y
+        g->cursor->pos_x = pos_x
+        g->cursor->pos_y = pos_y
+        g->cursor->visible = true
+        update_display = true
+    
+    // Schedule display update (QEMU graphic update)
+    if (update_display):
+        virtio_gpu_update_display(g)
+    
+    // Send response (QEMU sends this after processing)
+    send_ctrl_response(g, VIRTIO_GPU_RESP_OK_NODATA)
+```
+
+### 3. Display Integration (QEMU UI Layer)
+
+```pseudocode
+// From hw/display/virtio-gpu.c::virtio_gpu_update_display()
+function virtio_gpu_update_display(g):
+    // This is called when cursor changes
+    
+    if (!g->enable):
+        return
+    
+    // Get the primary display surface
+    ds = g->scanout[0].ds  // DisplaySurface
+    
+    if (!ds):
+        return
+    
+    // Trigger UI update
+    // QEMU uses a timer to coalesce updates
+    if (!g->update_timer):
+        g->update_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                       virtio_gpu_update_timer, g)
+    
+    timer_mod(g->update_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 10)
+
+// From ui/console.c - Actual cursor drawing
+function virtio_gpu_gl_flushed(vdev):
+    if (!g->cursor || !g->cursor->visible):
+        return
+    
+    // Get display dimensions
+    width = pixman_image_get_width(g->cursor->image)
+    height = pixman_image_get_height(g->cursor->image)
+    
+    // Calculate position with hotspot adjustment
+    draw_x = g->cursor->pos_x - g->cursor->hot_x
+    draw_y = g->cursor->pos_y - g->cursor->hot_y
+    
+    // Clamp to screen bounds
+    if (draw_x < 0):
+        src_x = -draw_x
+        draw_x = 0
+    else:
+        src_x = 0
+    
+    if (draw_y < 0):
+        src_y = -draw_y
+        draw_y = 0
+    else:
+        src_y = 0
+    
+    // Blit cursor onto display
+    // QEMU uses pixman for compositing
+    pixman_image_composite32(
+        PIXMAN_OP_OVER,           // Alpha blending
+        g->cursor->image,         // Source (cursor)
+        NULL,                     // No mask
+        ds->image,                // Destination (framebuffer)
+        src_x, src_y,             // Source offset
+        0, 0,                     // Mask offset (none)
+        draw_x, draw_y,           // Dest position
+        width - src_x,            // Width to copy
+        height - src_y            // Height to copy
+    )
+```
+
+## Driver Implementation (Guest Side)
+
+### Complete Driver Code (Linux virtio-gpu Style)
+
+```pseudocode
+// Based on drivers/gpu/drm/virtio/virtgpu_display.c
+
+// Constants matching QEMU implementation
+#define VIRTIO_GPU_CURSOR_WIDTH  64
+#define VIRTIO_GPU_CURSOR_HEIGHT 64
+#define VIRTIO_GPU_CURSOR_HOT_X  0
+#define VIRTIO_GPU_CURSOR_HOT_Y  0
+
+// QEMU-specific: Resource ID encoding for cursor
+#define VIRTIO_GPU_CURSOR_RESOURCE_ID(w, h) (((w) << 16) | (h))
+
+// Send cursor update to QEMU
+function virtio_gpu_cursor_update(vgdev, visible, x, y, image_data):
+    cmd = allocate(sizeof(struct virtio_gpu_update_cursor) + 
+                   VIRTIO_GPU_CURSOR_WIDTH * VIRTIO_GPU_CURSOR_HEIGHT * 4)
+    
+    // Fill command header
+    cmd->hdr.type = VIRTIO_GPU_CMD_UPDATE_CURSOR
+    cmd->hdr.flags = 0
+    cmd->hdr.fence_id = 0
+    cmd->hdr.ctx_id = 0
+    cmd->hdr.padding = 0
+    
+    if (!visible):
+        // Hide cursor
+        cmd->resource_id = cpu_to_le32(0)
+        cmd->hot_x = cpu_to_le32(0)
+        cmd->hot_y = cpu_to_le32(0)
+        cmd->padding = cpu_to_le32(0)
+        
+        // In QEMU, pos_x and pos_y follow the struct
+        pos_data = (uint32_t *)(cmd + 1)
+        pos_data[0] = cpu_to_le32(x)
+        pos_data[1] = cpu_to_le32(y)
+    else:
+        // Show cursor with image
+        width = VIRTIO_GPU_CURSOR_WIDTH
+        height = VIRTIO_GPU_CURSOR_HEIGHT
+        
+        // QEMU-specific: Encode width/height in resource_id
+        cmd->resource_id = cpu_to_le32(VIRTIO_GPU_CURSOR_RESOURCE_ID(width, height))
+        cmd->hot_x = cpu_to_le32(VIRTIO_GPU_CURSOR_HOT_X)
+        cmd->hot_y = cpu_to_le32(VIRTIO_GPU_CURSOR_HOT_Y)
+        cmd->padding = cpu_to_le32(0)
+        
+        // Position data
+        pos_data = (uint32_t *)(cmd + 1)
+        pos_data[0] = cpu_to_le32(x)
+        pos_data[1] = cpu_to_le32(y)
+        
+        // Cursor image data (ARGB, little-endian)
+        cursor_data = (uint8_t *)(pos_data + 2)
+        
+        // Convert cursor to ARGB format that QEMU expects
+        // QEMU expects BGRA in memory on little-endian systems
+        for (i = 0; i < width * height; i++):
+            pixel = image_data[i]  // Source pixel in driver's format
+            
+            // Extract components (depends on source format)
+            a = (pixel >> 24) & 0xFF
+            r = (pixel >> 16) & 0xFF
+            g = (pixel >> 8) & 0xFF
+            b = pixel & 0xFF
+            
+            // Store in QEMU expected format (BGRA in memory)
+            cursor_data[i*4 + 0] = b
+            cursor_data[i*4 + 1] = g
+            cursor_data[i*4 + 2] = r
+            cursor_data[i*4 + 3] = a
+    
+    // Send to QEMU via virtqueue
+    sg_init_one(&sg, cmd, total_size)
+    virtqueue_add_outbuf(vq, &sg, 1, cmd, GFP_KERNEL)
+    virtqueue_kick(vq)
+    
+    // Wait for response (simplified - real driver uses async)
+    wait_for_virtio_response(VIRTIO_GPU_RESP_OK_NODATA)
+
+// Position-only update (if feature negotiated)
+function virtio_gpu_cursor_move(vgdev, x, y):
+    if (!vgdev->has_cursor_pos):
+        return -ENOTSUP  // Need full update with image
+    
+    cmd = allocate(sizeof(struct virtio_gpu_update_cursor))
+    
+    // Reuse existing cursor resource
+    cmd->resource_id = cpu_to_le32(vgdev->cursor_res_id)
+    cmd->hot_x = cpu_to_le32(vgdev->cursor_hot_x)
+    cmd->hot_y = cpu_to_le32(vgdev->cursor_hot_y)
+    cmd->padding = cpu_to_le32(0)
+    
+    // Position
+    pos_data = (uint32_t *)(cmd + 1)
+    pos_data[0] = cpu_to_le32(x)
+    pos_data[1] = cpu_to_le32(y)
+    
+    // No image data needed for position-only update
+    
+    // Send command
+    sg_init_one(&sg, cmd, sizeof(struct virtio_gpu_update_cursor) + 8)
+    virtqueue_add_outbuf(vq, &sg, 1, cmd, GFP_KERNEL)
+    virtqueue_kick(vq)
+```
+
+## QEMU Command Processing Details
+
+```pseudocode
+// Exact QEMU command processing flow (from source)
+function virtio_gpu_handle_ctrl_cb(vdev, vq):
+    while (elem = virtqueue_pop(vq, sizeof(VirtQueueElement))):
+        // Parse command header (first part of buffer)
+        cmd = elem->in_sg[0].iov_base
+        cmd_size = elem->in_sg[0].iov_len
+        
+        // Validate minimum size
+        if (cmd_size < sizeof(struct virtio_gpu_ctrl_hdr)):
+            send_error_response(VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER)
+            continue
+        
+        hdr = (struct virtio_gpu_ctrl_hdr *)cmd
+        
+        // Dispatch to appropriate handler
+        switch (hdr->type):
+            case VIRTIO_GPU_CMD_UPDATE_CURSOR:
+                // Special handling: cursor data may be in same buffer
+                total_size = cmd_size + elem->in_sg[1].iov_len
+                
+                // QEMU actually copies all data into a single buffer
+                combined_cmd = g_malloc(total_size)
+                memcpy(combined_cmd, cmd, cmd_size)
+                
+                if (elem->in_sg[1].iov_len > 0):
+                    memcpy(combined_cmd + cmd_size,
+                           elem->in_sg[1].iov_base,
+                           elem->in_sg[1].iov_len)
+                
+                handle_update_cursor(g, combined_cmd)
+                g_free(combined_cmd)
+                break
+            // ... other commands
+        
+        // Send response
+        resp = g_malloc0(sizeof(struct virtio_gpu_ctrl_hdr))
+        resp->type = VIRTIO_GPU_RESP_OK_NODATA
+        virtqueue_push(vq, &resp_sg, 1)
+        virtio_notify(vdev, vq)
+```
+
+## Testing & Debugging Information
+
+### QEMU Command Line for Cursor Debug
+
+```bash
+# Enable virtio-gpu with cursor support
+qemu-system-x86_64 \
+  -device virtio-gpu-pci,id=gp0 \
+  -vga none \
+  -display sdl,gl=on \
+  -trace virtio_gpu*
+
+# Debug tracing (add to QEMU command)
+-trace events=/path/to/events \
+-trace virtio_gpu_cmd* \
+-trace virtio_gpu_cursor*
+
+# Common QEMU debug events for cursor:
+# virtio_gpu_cmd
+# virtio_gpu_cursor_update
+# virtio_gpu_update_cursor
+```
+
+### Common Issues & Solutions
+
+1. **Cursor not appearing**: QEMU expects BGRA format in memory on LE systems
+2. **Cursor position wrong**: Hotspot adjustment must be done by driver
+3. **Performance issues**: Use `VIRTIO_GPU_F_CURSOR_POS_UPDATE` if available
+4. **Artifacts on resize**: QEMU caches cursor image; force full update on size change
+
+### Validation Steps
+
+```pseudocode
+// Test sequence for cursor functionality
+function test_cursor_implementation():
+    // 1. Initial cursor setup
+    send_cursor_update(visible=true, x=100, y=100, default_arrow_image)
+    
+    // 2. Move cursor (position-only if supported)
+    for i in range(10):
+        send_cursor_move(x=100+i, y=100+i)
+        sleep(16)  // ~60fps
+    
+    // 3. Hide cursor
+    send_cursor_update(visible=false, x=0, y=0, NULL)
+    
+    // 4. Show different cursor
+    send_cursor_update(visible=true, x=200, y=200, hand_cursor_image)
+    
+    // 5. Test hotspot
+    send_cursor_update(visible=true, x=300, y=300, 
+                       image=arrow_image, hot_x=2, hot_y=2)
+```
+
+## Key Takeaways from QEMU Source
+
+1. **Cursor data is inline**: No resource creation needed, data sent with command
+2. **Width/height in resource_id**: QEMU-specific encoding `(width << 16) | height`
+3. **Position in data section**: Following the struct, not in the struct itself
+4. **BGRA memory format**: On little-endian systems, bytes are BGRA order
+5. **256x256 max size**: QEMU limitation, not VirtIO spec limitation
+6. **Timer-based updates**: QEMU coalesces display updates for performance
+
+This implementation matches exactly how QEMU processes VirtIO GPU cursor commands, including all the quirks and specific behaviors of the actual QEMU codebase.
