@@ -41,40 +41,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="bf366474-e9be-4fff-b610-ea6d6eb6be02" name="Changes" comment=".">
-      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/keysos.iml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/event.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/event.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/graphics/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/graphics/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/graphics/primitives.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/graphics/primitives.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/widget.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/widget.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/window.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/window.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/periferics/keyboard.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/periferics/keyboard.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/periferics/mouse.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/periferics/mouse.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/disk.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/disk.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/exceptions.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/exceptions.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/memory/pmm.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/memory/pmm.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/composer.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/composer.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/display.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/display.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/events.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/events.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/input.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/input.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/make.bat" beforeDir="false" afterPath="$PROJECT_DIR$/make.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/std/src/memory/heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/std/src/memory/heap.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/std/src/memory/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/std/src/memory/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/swiftboot/stage2/src/disk.rs" beforeDir="false" afterPath="$PROJECT_DIR$/swiftboot/stage2/src/disk.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/swiftboot/stage2/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/swiftboot/stage2/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/swiftboot/stage3/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/swiftboot/stage3/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/swiftboot/stage4/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/swiftboot/stage4/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tree/user" beforeDir="false" afterPath="$PROJECT_DIR$/tree/user" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/userland/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/userland/src/main.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/admin.svg" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/info.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/inkui.svg" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/squid.svg" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/wallpaper.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/wallpaper.svg" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -237,7 +209,7 @@
       <workItem from="1765596971019" duration="73432000" />
       <workItem from="1765820075102" duration="70805000" />
       <workItem from="1766009564025" duration="32112000" />
-      <workItem from="1766110694342" duration="22542000" />
+      <workItem from="1766110694342" duration="22927000" />
     </task>
     <task id="LOCAL-00001" summary=".">
       <option name="closed" value="true" />
@@ -439,7 +411,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766012523857</updated>
     </task>
-    <option name="localTasksCounter" value="26" />
+    <task id="LOCAL-00026" summary=".">
+      <option name="closed" value="true" />
+      <created>1766158390140</created>
+      <option name="number" value="00026" />
+      <option name="presentableId" value="LOCAL-00026" />
+      <option name="project" value="LOCAL" />
+      <updated>1766158390140</updated>
+    </task>
+    <option name="localTasksCounter" value="27" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
