@@ -53,19 +53,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="bf366474-e9be-4fff-b610-ea6d6eb6be02" name="Changes" comment=".">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apps/shell/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/apps/shell/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/vfs.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/vfs.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/make.bat" beforeDir="false" afterPath="$PROJECT_DIR$/make.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/std/src/fs/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/std/src/fs/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/std/src/os.rs" beforeDir="false" afterPath="$PROJECT_DIR$/std/src/os.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tree/sys/bin/shell.elf" beforeDir="false" afterPath="$PROJECT_DIR$/tree/sys/bin/shell.elf" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tree/sys/bin/tmap.elf" beforeDir="false" afterPath="$PROJECT_DIR$/tree/sys/bin/tmap.elf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/rtc.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/rtc.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -246,7 +234,7 @@
       <workItem from="1766317013838" duration="7417000" />
       <workItem from="1766343501154" duration="15000" />
       <workItem from="1766386113109" duration="6990000" />
-      <workItem from="1766395123007" duration="5836000" />
+      <workItem from="1766395123007" duration="5965000" />
     </task>
     <task id="LOCAL-00001" summary=".">
       <option name="closed" value="true" />
@@ -472,7 +460,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766401331672</updated>
     </task>
-    <option name="localTasksCounter" value="29" />
+    <task id="LOCAL-00029" summary=".">
+      <option name="closed" value="true" />
+      <created>1766406856790</created>
+      <option name="number" value="00029" />
+      <option name="presentableId" value="LOCAL-00029" />
+      <option name="project" value="LOCAL" />
+      <updated>1766406856790</updated>
+    </task>
+    <option name="localTasksCounter" value="30" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

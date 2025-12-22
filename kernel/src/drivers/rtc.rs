@@ -5,8 +5,8 @@ const CMOS_DATA: u16 = 0x71;
 
 pub fn read_rtc(reg: u8) -> u8 {
     unsafe {
-        Port::outb(CMOS_ADDR, reg);
-        Port::inb(CMOS_DATA)
+        Port::new(CMOS_ADDR).outb(reg);
+        Port::new(CMOS_DATA).inb()
     }
 }
 
