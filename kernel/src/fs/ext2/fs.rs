@@ -86,6 +86,43 @@ impl Ext2 {
         }
     }
 
+    fn write_disk_data(&mut self, offset: u64, buffer: &[u8]) {
+        let abs_offset = offset + (self.base_lba * 512);
+        let start_lba = abs_offset / 512;
+        let offset_in_sector = (abs_offset % 512) as usize;
+
+        // Optimization: Full aligned writes
+        if offset_in_sector == 0 && (buffer.len() % 512) == 0 && buffer.len() >= 512 {
+             disk::write(start_lba, self.disk_id, buffer);
+             return;
+        }
+
+        let mut current_lba = start_lba;
+        let mut bytes_written = 0;
+        let total_bytes = buffer.len();
+
+        while bytes_written < total_bytes {
+            // Read into cache first (RMW)
+            if self.cache_lba != Some(current_lba) {
+                disk::read(current_lba, self.disk_id, &mut self.cache_data);
+                self.cache_lba = Some(current_lba);
+            }
+
+            let start_index = if current_lba == start_lba { offset_in_sector } else { 0 };
+            let remaining_in_sector = 512 - start_index;
+            let to_copy = core::cmp::min(total_bytes - bytes_written, remaining_in_sector);
+
+            // Modify cache
+            self.cache_data[start_index..start_index+to_copy].copy_from_slice(&buffer[bytes_written..bytes_written+to_copy]);
+            
+            // Write back to disk
+            disk::write(current_lba, self.disk_id, &self.cache_data);
+
+            bytes_written += to_copy;
+            current_lba += 1;
+        }
+    }
+
     pub fn read_block_group_descriptor(&mut self, group_idx: u32) -> BlockGroupDescriptor {
         let bgdt_start_block = if self.block_size == 1024 { 2 } else { 1 };
         let desc_size = size_of::<BlockGroupDescriptor>() as u64;
@@ -100,6 +137,23 @@ impl Ext2 {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), &mut desc as *mut _ as *mut u8, size_of::<BlockGroupDescriptor>());
         }
         desc
+    }
+
+    pub fn write_block_group_descriptor(&mut self, group_idx: u32, desc: &BlockGroupDescriptor) {
+        let bgdt_start_block = if self.block_size == 1024 { 2 } else { 1 };
+        let desc_size = size_of::<BlockGroupDescriptor>() as u64;
+        let offset = (bgdt_start_block as u64 * self.block_size) + (group_idx as u64 * desc_size);
+        
+        let ptr = desc as *const BlockGroupDescriptor as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size_of::<BlockGroupDescriptor>()) };
+        self.write_disk_data(offset, slice);
+    }
+
+    pub fn write_superblock(&mut self) {
+        let offset = 1024; // Superblock is always at 1024 bytes
+        let ptr = &self.superblock as *const Superblock as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size_of::<Superblock>()) };
+        self.write_disk_data(offset, slice);
     }
 
     pub fn read_inode(&mut self, inode_idx: u32) -> Inode {
@@ -127,6 +181,19 @@ impl Ext2 {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), &mut inode as *mut _ as *mut u8, size_of::<Inode>());
         }
         inode
+    }
+
+    pub fn write_inode(&mut self, inode_idx: u32, inode: &Inode) {
+        let group = (inode_idx - 1) / self.inodes_per_group;
+        let index_in_group = (inode_idx - 1) % self.inodes_per_group;
+        let bg_desc = self.read_block_group_descriptor(group);
+        let inode_table_offset = bg_desc.inode_table as u64 * self.block_size;
+        let inode_size = 128; // Assuming 128
+        let inode_offset = inode_table_offset + (index_in_group as u64 * inode_size as u64);
+        
+        let ptr = inode as *const Inode as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size_of::<Inode>()) };
+        self.write_disk_data(inode_offset, slice);
     }
 
     pub fn get_block_address(&mut self, inode: &Inode, logical_block: u32) -> u32 {
@@ -174,6 +241,134 @@ impl Ext2 {
         let mut bytes = [0u8; 4];
         self.read_disk_data(read_offset, &mut bytes);
         u32::from_le_bytes(bytes)
+    }
+
+    fn write_indirect_pointer(&mut self, block_addr: u32, offset: u32, val: u32) {
+        let write_offset = (block_addr as u64 * self.block_size) + (offset as u64 * 4);
+        self.write_disk_data(write_offset, &val.to_le_bytes());
+    }
+
+    fn alloc_block(&mut self) -> u32 {
+        let groups = self.superblock.blocks_count / self.superblock.blocks_per_group;
+        for i in 0..=groups {
+            let mut bg = self.read_block_group_descriptor(i);
+            if bg.free_blocks_count > 0 {
+                let bitmap_block = bg.block_bitmap;
+                let mut bitmap = alloc::vec![0u8; self.block_size as usize];
+                self.read_disk_data(bitmap_block as u64 * self.block_size, &mut bitmap);
+
+                for byte_idx in 0..self.block_size as usize {
+                    if bitmap[byte_idx] != 0xFF {
+                        for bit_idx in 0..8 {
+                            if (bitmap[byte_idx] & (1 << bit_idx)) == 0 {
+                                // Found free bit
+                                bitmap[byte_idx] |= 1 << bit_idx;
+                                self.write_disk_data(bitmap_block as u64 * self.block_size, &bitmap);
+                                
+                                bg.free_blocks_count -= 1;
+                                self.write_block_group_descriptor(i, &bg);
+                                
+                                self.superblock.free_blocks_count -= 1;
+                                self.write_superblock();
+
+                                let block_id = (i * self.superblock.blocks_per_group) + (byte_idx as u32 * 8) + bit_idx as u32 + self.superblock.first_data_block;
+                                return block_id;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    fn alloc_inode(&mut self) -> u32 {
+        let groups = self.superblock.inodes_count / self.superblock.inodes_per_group;
+        for i in 0..=groups {
+            let mut bg = self.read_block_group_descriptor(i);
+            if bg.free_inodes_count > 0 {
+                let bitmap_block = bg.inode_bitmap;
+                let mut bitmap = alloc::vec![0u8; self.block_size as usize];
+                self.read_disk_data(bitmap_block as u64 * self.block_size, &mut bitmap);
+
+                for byte_idx in 0..self.block_size as usize {
+                    if bitmap[byte_idx] != 0xFF {
+                        for bit_idx in 0..8 {
+                            if (bitmap[byte_idx] & (1 << bit_idx)) == 0 {
+                                bitmap[byte_idx] |= 1 << bit_idx;
+                                self.write_disk_data(bitmap_block as u64 * self.block_size, &bitmap);
+                                
+                                bg.free_inodes_count -= 1;
+                                self.write_block_group_descriptor(i, &bg);
+                                
+                                self.superblock.free_inodes_count -= 1;
+                                self.write_superblock();
+
+                                let inode_id = (i * self.superblock.inodes_per_group) + (byte_idx as u32 * 8) + bit_idx as u32 + 1;
+                                return inode_id;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    fn free_block(&mut self, block_id: u32) {
+        if block_id == 0 { return; }
+        
+        let block_idx = block_id - self.superblock.first_data_block;
+        let group = block_idx / self.superblock.blocks_per_group;
+        let index_in_group = block_idx % self.superblock.blocks_per_group;
+        
+        let mut bg = self.read_block_group_descriptor(group);
+        let bitmap_block = bg.block_bitmap;
+        
+        let mut bitmap = alloc::vec![0u8; self.block_size as usize];
+        self.read_disk_data(bitmap_block as u64 * self.block_size, &mut bitmap);
+        
+        let byte_idx = (index_in_group / 8) as usize;
+        let bit_idx = index_in_group % 8;
+        
+        if (bitmap[byte_idx] & (1 << bit_idx)) != 0 {
+            bitmap[byte_idx] &= !(1 << bit_idx);
+            self.write_disk_data(bitmap_block as u64 * self.block_size, &bitmap);
+            
+            bg.free_blocks_count += 1;
+            self.write_block_group_descriptor(group, &bg);
+            
+            self.superblock.free_blocks_count += 1;
+            self.write_superblock();
+        }
+    }
+
+    fn free_inode(&mut self, inode_id: u32) {
+        if inode_id == 0 { return; }
+        
+        let inode_idx = inode_id - 1;
+        let group = inode_idx / self.superblock.inodes_per_group;
+        let index_in_group = inode_idx % self.superblock.inodes_per_group;
+        
+        let mut bg = self.read_block_group_descriptor(group);
+        let bitmap_block = bg.inode_bitmap;
+        
+        let mut bitmap = alloc::vec![0u8; self.block_size as usize];
+        self.read_disk_data(bitmap_block as u64 * self.block_size, &mut bitmap);
+        
+        let byte_idx = (index_in_group / 8) as usize;
+        let bit_idx = index_in_group % 8;
+        
+        if (bitmap[byte_idx] & (1 << bit_idx)) != 0 {
+            bitmap[byte_idx] &= !(1 << bit_idx);
+            self.write_disk_data(bitmap_block as u64 * self.block_size, &bitmap);
+            
+            bg.free_inodes_count += 1;
+            self.write_block_group_descriptor(group, &bg);
+            
+            self.superblock.free_inodes_count += 1;
+            self.write_superblock();
+        }
     }
 }
 
@@ -224,8 +419,6 @@ impl VfsNode for Ext2Node {
         let total_size = self.size();
         if offset >= total_size { return Ok(0); }
 
-        crate::debugln!("Ext2Node::read: Off={}, BufLen={}", offset, buffer.len());
-
         let mut bytes_read = 0;
         let mut current_offset = offset;
         let mut buf_offset = 0;
@@ -237,7 +430,6 @@ impl VfsNode for Ext2Node {
         // 1. Handle Start (Unaligned)
         let start_block_offset = (current_offset % block_size) as usize;
         if start_block_offset != 0 {
-            crate::debugln!("  Start unaligned read");
             let block_idx = (current_offset / block_size) as u32;
             let phys = fs.get_block_address(&self.inode, block_idx);
             
@@ -259,10 +451,8 @@ impl VfsNode for Ext2Node {
         while (len - bytes_read) >= block_size as usize {
             let start_block_idx = (current_offset / block_size) as u32;
             
-            // Check logic - maybe redundant reads here
             let start_phys = fs.get_block_address(&self.inode, start_block_idx);
             
-            // Check for contiguous run
             let mut count = 1;
             let max_blocks = core::cmp::min(32, (len - bytes_read) / block_size as usize); 
             
@@ -276,8 +466,6 @@ impl VfsNode for Ext2Node {
                     }
                 }
                 
-                //crate::debugln!("  Mid Aligned: Block {}, Phys {}, Count {}", start_block_idx, start_phys, count);
-
                 let chunk_size = count * block_size as usize;
                 let dest_slice = &mut buffer[buf_offset .. buf_offset + chunk_size];
                 fs.read_disk_data(start_phys as u64 * block_size, dest_slice);
@@ -286,7 +474,6 @@ impl VfsNode for Ext2Node {
                 current_offset += chunk_size as u64;
                 buf_offset += chunk_size;
             } else {
-                crate::debugln!("  Mid Aligned: Sparse Block {}", start_block_idx);
                 let chunk_size = block_size as usize;
                 let dest_slice = &mut buffer[buf_offset .. buf_offset + chunk_size];
                 dest_slice.fill(0);
@@ -299,7 +486,6 @@ impl VfsNode for Ext2Node {
 
         // 3. Handle End (Unaligned)
         if bytes_read < len {
-            crate::debugln!("  End unaligned read");
             let block_idx = (current_offset / block_size) as u32;
             let phys = fs.get_block_address(&self.inode, block_idx);
             
@@ -315,16 +501,81 @@ impl VfsNode for Ext2Node {
             bytes_read += to_copy;
         }
 
-        crate::debugln!("Ext2Node::read done. Bytes read: {}", bytes_read);
         Ok(bytes_read)
     }
 
-    fn write(&mut self, _offset: u64, _buffer: &[u8]) -> Result<usize, String> {
-        Err(String::from("Read-only"))
+    fn write(&mut self, offset: u64, buffer: &[u8]) -> Result<usize, String> {
+        let fs = unsafe { &mut *self.fs };
+        let block_size = fs.block_size as u64;
+        
+        let mut bytes_written = 0;
+        let mut current_offset = offset;
+        let mut buf_offset = 0;
+        let len = buffer.len();
+        
+        let mut bounce_buf = alloc::vec![0u8; fs.block_size as usize];
+
+        while bytes_written < len {
+            let block_idx = (current_offset / block_size) as u32;
+            let block_offset = (current_offset % block_size) as usize;
+            
+            let mut phys = fs.get_block_address(&self.inode, block_idx);
+            
+            // Allocate block if missing
+            if phys == 0 {
+                phys = fs.alloc_block();
+                if phys == 0 { return Err(String::from("No free blocks")); }
+                
+                // Link block to inode
+                if block_idx < 12 {
+                    self.inode.block[block_idx as usize] = phys;
+                } else {
+                    // Indirect blocks not implemented in write yet
+                    return Err(String::from("File too large (indirect write not impl)"));
+                }
+                
+                self.inode.blocks += (block_size / 512) as u32;
+                fs.write_inode(self.inode_idx, &self.inode);
+                
+                // Zero newly allocated block on disk to be safe
+                bounce_buf.fill(0);
+                fs.write_disk_data(phys as u64 * block_size, &bounce_buf);
+            }
+            
+            // Read-Modify-Write if partial block
+            if block_offset != 0 || (len - bytes_written) < block_size as usize {
+                fs.read_disk_data(phys as u64 * block_size, &mut bounce_buf);
+                
+                let to_copy = core::cmp::min(len - bytes_written, (block_size as usize) - block_offset);
+                bounce_buf[block_offset..block_offset+to_copy].copy_from_slice(&buffer[buf_offset..buf_offset+to_copy]);
+                
+                fs.write_disk_data(phys as u64 * block_size, &bounce_buf);
+                
+                bytes_written += to_copy;
+                current_offset += to_copy as u64;
+                buf_offset += to_copy;
+            } else {
+                // Full block write
+                let to_copy = block_size as usize;
+                fs.write_disk_data(phys as u64 * block_size, &buffer[buf_offset..buf_offset+to_copy]);
+                
+                bytes_written += to_copy;
+                current_offset += to_copy as u64;
+                buf_offset += to_copy;
+            }
+        }
+        
+        // Update size
+        if current_offset > self.inode.size as u64 {
+            self.inode.size = current_offset as u32;
+            fs.write_inode(self.inode_idx, &self.inode);
+        }
+        
+        Ok(bytes_written)
     }
 
     fn children(&mut self) -> Result<Vec<Box<dyn VfsNode>>, String> {
-        crate::debugln!("Listing children of inode {}", self.inode_idx);
+        //crate::debugln!("Listing children of inode {}", self.inode_idx);
         if self.kind() != FileType::Directory {
             return Err(String::from("Not a directory"));
         }
@@ -369,7 +620,7 @@ impl VfsNode for Ext2Node {
     }
 
     fn find(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
-        crate::debugln!("Finding file: {}", name);
+        //crate::debugln!("Finding file: {}", name);
         let children = self.children()?;
         for child in children {
             if child.name() == name {
@@ -377,5 +628,161 @@ impl VfsNode for Ext2Node {
             }
         }
         Err(String::from("File not found"))
+    }
+
+    fn create_file(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
+        self.create_node(name, 0x81B4) // File | 0644 (rw-r--r--)
+    }
+
+    fn create_dir(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
+        self.create_node(name, 0x41ED) // Directory | 0755 (rwxr-xr-x)
+    }
+}
+
+impl Ext2Node {
+    fn create_node(&mut self, name: &str, mode: u16) -> Result<Box<dyn VfsNode>, String> {
+        let fs = unsafe { &mut *self.fs };
+        
+        // 1. Allocate Inode
+        let inode_id = fs.alloc_inode();
+        if inode_id == 0 { return Err(String::from("No free inodes")); }
+        
+        let current_time = 0; // TODO: Get real time
+        
+        let new_inode = Inode {
+            mode,
+            uid: 0,
+            size: 0,
+            atime: current_time,
+            ctime: current_time,
+            mtime: current_time,
+            dtime: 0,
+            gid: 0,
+            links_count: 1, 
+            blocks: 0,
+            flags: 0,
+            osd1: 0,
+            block: [0; 15],
+            generation: 0,
+            file_acl: 0,
+            dir_acl: 0,
+            faddr: 0,
+            osd2: [0; 3],
+        };
+        
+        fs.write_inode(inode_id, &new_inode);
+        
+        // 2. Add to Directory
+        if let Err(e) = self.add_directory_entry(inode_id, name, if (mode & 0xF000) == 0x4000 { 2 } else { 1 }) {
+            // Rollback inode alloc?
+            fs.free_inode(inode_id);
+            return Err(e);
+        }
+        
+        Ok(Box::new(Ext2Node {
+            fs: self.fs,
+            inode_idx: inode_id,
+            inode: new_inode,
+            name: String::from(name),
+        }))
+    }
+
+    fn add_directory_entry(&mut self, inode_id: u32, name: &str, file_type: u8) -> Result<(), String> {
+        let fs = unsafe { &mut *self.fs };
+        let name_len = name.len();
+        if name_len > 255 { return Err(String::from("Name too long")); }
+        
+        let mut needed_len = 8 + name_len;
+        needed_len = (needed_len + 3) & !3; // Align 4
+        
+        let mut buf = alloc::vec![0u8; fs.block_size as usize];
+        let mut offset = 0;
+        let total_size = self.size();
+        
+        // Scan directory to find space
+        while offset < total_size {
+            // Read block
+            let block_off = offset - (offset % fs.block_size as u64);
+            // Optimization: Only read if we crossed block boundary or first iter
+            let block_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+            let read_off = block_addr as u64 * fs.block_size as u64;
+            
+            fs.read_disk_data(read_off, &mut buf);
+            
+            let mut block_pos = 0;
+            while block_pos < fs.block_size as usize {
+                let ptr = unsafe { buf.as_ptr().add(block_pos) };
+                let entry = unsafe { &mut *(ptr as *mut DirectoryEntry) };
+                
+                if entry.rec_len == 0 { break; } // Corrupt?
+                
+                let used_len = 8 + entry.name_len as usize;
+                let used_aligned = (used_len + 3) & !3;
+                
+                let available = entry.rec_len as usize - used_aligned;
+                
+                if available >= needed_len {
+                    // Found space! Split entry.
+                    let old_rec_len = entry.rec_len;
+                    entry.rec_len = used_aligned as u16;
+                    
+                    let next_ptr = unsafe { buf.as_mut_ptr().add(block_pos + used_aligned) };
+                    let next_entry = unsafe { &mut *(next_ptr as *mut DirectoryEntry) };
+                    
+                    next_entry.inode = inode_id;
+                    next_entry.rec_len = (old_rec_len as usize - used_aligned) as u16;
+                    next_entry.name_len = name_len as u8;
+                    next_entry.file_type = file_type;
+                    
+                    let name_dest = unsafe { next_ptr.add(8) };
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(name.as_ptr(), name_dest, name_len);
+                    }
+                    
+                    // Write back block
+                    let write_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+                    let write_off = write_addr as u64 * fs.block_size as u64;
+                    fs.write_disk_data(write_off, &buf);
+                    
+                    return Ok(());
+                }
+                
+                block_pos += entry.rec_len as usize;
+            }
+            
+            offset += fs.block_size as u64;
+        }
+        
+        // If no space, allocate new block for directory
+        let new_block = fs.alloc_block();
+        if new_block == 0 { return Err(String::from("No space for dir entry")); }
+        
+        // Append block to inode
+        let block_idx = self.inode.blocks / (fs.block_size as u32 / 512);
+        if block_idx < 12 {
+            self.inode.block[block_idx as usize] = new_block;
+            self.inode.blocks += fs.block_size as u32 / 512;
+            self.inode.size += fs.block_size as u32;
+            fs.write_inode(self.inode_idx, &self.inode);
+        } else {
+            return Err(String::from("Dir too large"));
+        }
+        
+        // Initialize new block
+        buf.fill(0);
+        let entry = unsafe { &mut *(buf.as_mut_ptr() as *mut DirectoryEntry) };
+        entry.inode = inode_id;
+        entry.rec_len = fs.block_size as u16;
+        entry.name_len = name_len as u8;
+        entry.file_type = file_type;
+        
+        let name_dest = unsafe { buf.as_mut_ptr().add(8) };
+        unsafe {
+            core::ptr::copy_nonoverlapping(name.as_ptr(), name_dest, name_len);
+        }
+        
+        fs.write_disk_data(new_block as u64 * fs.block_size as u64, &buf);
+        
+        Ok(())
     }
 }

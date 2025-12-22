@@ -4,6 +4,7 @@
 use inkui::{Window, Widget, Color, Size};
 use std::println;
 use std::fs::File;
+use std::graphics::Items; // Import Items for Window Types
 
 extern crate alloc;
 
@@ -14,27 +15,28 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024 * 200; // Increased heap for image loading
+    let heap_size = 1024 * 1024 * 200; // Large static heap
     let heap_ptr = std::memory::malloc(heap_size);
     std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
 
-    println!("Starting Wallpaper App...");
+    println!("Starting Userland Shell...");
 
     let width = std::graphics::get_screen_width();
     let height = std::graphics::get_screen_height();
     println!("Detected Screen Resolution: {}x{}", width, height);
 
-    let mut win = Window::new("Wallpaper", width, height);
-    win.can_move = false; 
-    win.can_resize = false;
+    // --- 1. Wallpaper Window ---
+    let mut win_wallpaper = Window::new("Wallpaper", width, height);
+    win_wallpaper.w_type = Items::Wallpaper; // Register as Wallpaper (Bottom Z-Index)
+    win_wallpaper.can_move = false; 
+    win_wallpaper.can_resize = false;
 
-    // 1. Root Container
-    let mut root = Widget::frame(1)
+    let mut root_wallpaper = Widget::frame(1)
         .width(Size::Relative(100))
         .height(Size::Relative(100))
         .background_color(Color::rgb(0, 0, 0));
 
-    // 2. Load Image from VFS
+    // Load Image
     if let Ok(mut file) = File::open("@0xE0/sys/img/wallpaper.png") {
         let size = file.size();
         if size > 0 {
@@ -42,31 +44,45 @@ pub extern "C" fn _start() -> ! {
             let buffer = unsafe { core::slice::from_raw_parts_mut(buffer_addr as *mut u8, size) };
             
             if file.read(buffer).is_ok() {
-                println!("Image loaded ({} bytes). Rendering PNG...", size);
-                
+                println!("Wallpaper loaded.");
                 let img_widget = Widget::image(2, buffer)
                     .width(Size::Relative(100))
                     .height(Size::Relative(100));
-                
-                root = root.add_child(img_widget);
-            } else {
-                println!("Failed to read image file.");
+                root_wallpaper = root_wallpaper.add_child(img_widget);
             }
-            // Memory is not freed because Widget::image copies the data, but buffer_addr leaks here.
-            // In a real app we'd free it, but for a wallpaper that runs forever it's minor.
-            // Ideally: std::memory::free(buffer_addr, 0);
+            // Ideally free buffer_addr here
         }
-    } else {
-        println!("Could not find /sys/img/wallpaper.png");
     }
 
-    win.children.push(root);
-    win.show();
+    win_wallpaper.children.push(root_wallpaper);
+    win_wallpaper.show();
 
-    println!("Wallpaper displayed.");
+    // --- 2. TaskBar Window ---
+    let bar_height = height * 6 / 100; // 6% height
+    let mut win_taskbar = Window::new("TaskBar", width, bar_height);
+    win_taskbar.w_type = Items::Bar; // Register as TaskBar (Top Z-Index)
+    win_taskbar.x = 0;
+    win_taskbar.y = 0; // Hang at top
+    win_taskbar.can_move = false;
+    win_taskbar.can_resize = false;
+
+    let root_taskbar = Widget::frame(100)
+        .width(Size::Relative(100))
+        .height(Size::Relative(100))
+        .background_color(Color::rgb(13, 13, 13)); // #0D0D0D
+
+    win_taskbar.children.push(root_taskbar);
+    win_taskbar.show();
+
+    println!("Desktop Environment Initialized.");
+    
+    // Launch Terminal
+    std::os::exec("@0xE0/sys/bin/term.elf");
 
     loop {
-        //win.event_loop();
+        // In a real shell, we would poll events for both windows here.
+        // win_taskbar.event_loop();
+        // win_wallpaper.event_loop();
         std::os::yield_task();
     }
 }

@@ -54,23 +54,23 @@ const KEYBOARD_CMD_ENABLE_SCANNING: u8 = 0xF4;
 // More complete mappings would require state tracking (Shift, Ctrl, Alt).
 // For now, only printable ASCII characters are handled.
 const SCANCODE_MAP_LOWERCASE: [char; 128] = [
-    '\0', '\x1B', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\x08', '\t',
-    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n', '\0', 'a', 's',
-    'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', '\0', '\\', 'z', 'x', 'c', 'v',
-    'b', 'n', 'm', ',', '.', '/', '\0', '\0', '\0', ' ', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\x1B', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '\'', 'ì', '\x08', '\t',
+    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'è', '+', '\n', '\0', 'a', 's',
+    'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ò', 'à', '\\', '\0', 'ù', 'z', 'x', 'c', 'v',
+    'b', 'n', 'm', ',', '.', '-', '\0', '\0', '\0', ' ', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '<', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
 ];
 
 const SCANCODE_MAP_UPPERCASE: [char; 128] = [
-    '\0', '\x1B', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\x08', '\t',
-    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n', '\0', 'A', 'S',
-    'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', '\0', '|', 'Z', 'X', 'C', 'V',
-    'B', 'N', 'M', '<', '>', '?', '\0', '\0', '\0', ' ', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\x1B', '!', '"', '£', '$', '%', '&', '/', '(', ')', '=', '?', '^', '\x08', '\t',
+    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', 'é', '*', '\n', '\0', 'A', 'S',
+    'D', 'F', 'G', 'H', 'J', 'K', 'L', 'ç', '°', '|', '\0', '§', 'Z', 'X', 'C', 'V',
+    'B', 'N', 'M', ';', ':', '_', '\0', '\0', '\0', ' ', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '>', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
     '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
 ];
@@ -78,6 +78,23 @@ const SCANCODE_MAP_UPPERCASE: [char; 128] = [
 // State to track shift key status
 static mut SHIFT_ACTIVE: bool = false;
 static mut E0_ACTIVE: bool = false;
+static mut SUPER_ACTIVE: bool = false;
+static mut ALT_ACTIVE: bool = false;
+
+pub fn is_super_active() -> bool {
+    unsafe { SUPER_ACTIVE }
+}
+
+const SCANCODE_MAP_ALT: [char; 128] = [
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '{', '[', ']', '}', '\0', '\0', '\0', '\0',
+    '@', '\0', '€', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '[', ']', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '@', '#', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+    '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+];
 
 fn wait_for_read() -> bool {
     let mut timeout = 100000;
@@ -157,37 +174,71 @@ pub fn handle_scancode(scancode: u8) -> Option<u32> {
         E0_ACTIVE = false;
 
         match scancode {
-            // Shift keys (make codes)
-            0x2A | 0x36 => { // Left Shift, Right Shift
+            // Windows Key
+            0x5B | 0x5C if is_e0 => {
+                SUPER_ACTIVE = true;
+                crate::debugln!("Global Shortcut: Super Key Pressed");
+                None
+            },
+            0xDB | 0xDC if is_e0 => {
+                SUPER_ACTIVE = false;
+                None
+            },
+
+            // Alt Key (Left: 38, Right: E0 38)
+            0x38 => {
+                ALT_ACTIVE = true;
+                None
+            },
+            0xB8 => {
+                ALT_ACTIVE = false;
+                None
+            },
+
+            // Shift keys
+            0x2A | 0x36 => { 
                 SHIFT_ACTIVE = true;
                 None
             },
-            // Shift keys (break codes)
-            0xAA | 0xB6 => { // Left Shift, Right Shift
+            0xAA | 0xB6 => { 
                 SHIFT_ACTIVE = false;
                 None
             },
-            // Special keys (make codes)
-            0x0E => Some(KEY_BACKSPACE), // Backspace
-            0x1C => Some(KEY_ENTER), // Enter
-            0x39 => Some(' ' as u32), // Space
-            0x01 => Some('\x1B' as u32), // ESC (Escape)
-            0x0F => Some('\t' as u32), // Tab
             
-            // Arrow Keys (Extended)
+            // Special keys
+            0x0E => Some(KEY_BACKSPACE), 
+            0x1C => Some(KEY_ENTER), 
+            0x39 => Some(' ' as u32), 
+            0x01 => Some('\x1B' as u32), 
+            0x0F => Some('\t' as u32), 
+            
+            // Arrow Keys
             0x4B if is_e0 => Some(KEY_LEFT),
             0x4D if is_e0 => Some(KEY_RIGHT),
             0x48 if is_e0 => Some(KEY_UP),
             0x50 if is_e0 => Some(KEY_DOWN),
 
+            // < > key (ISO Backslash, usually left of Z)
+            0x56 => {
+                if SHIFT_ACTIVE {
+                    Some('>' as u32)
+                } else {
+                    Some('<' as u32)
+                }
+            },
+
             // Regular keys (make codes)
             0x02..=0x0D | // 1-0, -, =
-            0x10..=0x19 | // Q-P, [, ]
-            0x1E..=0x26 | // A-L, ;, '
-            0x2C..=0x35 | // Z-M, ,, ., /
+            0x10..=0x1B | // Q-P, [, ]
+            0x1E..=0x28 | // A-L, ;, '
+            0x2B..=0x35 | // \, Z-M, ,, ., /
+            0x39 | // Space
             0x3A => {
                 if scancode < 128 {
-                    if SHIFT_ACTIVE {
+                    if ALT_ACTIVE {
+                        let c = SCANCODE_MAP_ALT[scancode as usize];
+                        if c != '\0' { Some(c as u32) } else { None }
+                    } else if SHIFT_ACTIVE {
                         let c = SCANCODE_MAP_UPPERCASE[scancode as usize];
                         if c != '\0' { Some(c as u32) } else { None }
                     } else {

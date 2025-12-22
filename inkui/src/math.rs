@@ -57,3 +57,13 @@ pub fn ceil_f32(x: f32) -> f32 {
         xi as f32
     }
 }
+
+pub fn floor_f32(x: f32) -> f32 {
+    let xi = x as i32;
+    let xf = xi as f32;
+    if xf > x {
+        (xi - 1) as f32
+    } else {
+        xf
+    }
+}

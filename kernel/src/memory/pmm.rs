@@ -244,53 +244,6 @@ pub fn allocate_memory(bytes: usize, pid: u64) -> Option<u64> {
     }
 }
 
-pub unsafe fn realloc_memory(old_addr: u64, old_bytes: usize, new_bytes: usize, pid: u64) -> Option<u64> {
-    if new_bytes <= old_bytes { return Some(old_addr); }
-    
-    let old_pages = (old_bytes + PAGE_SIZE as usize - 1) / PAGE_SIZE as usize;
-    let new_pages = (new_bytes + PAGE_SIZE as usize - 1) / PAGE_SIZE as usize;
-    
-    if old_pages == new_pages { return Some(old_addr); }
-
-    lock_pmm();
-    let pmm_ptr = &raw mut PMM;
-    
-    let mut alloc_idx = MAX_ALLOCS;
-    for i in 0..MAX_ALLOCS {
-        if (*pmm_ptr).allocations[i].used && (*pmm_ptr).allocations[i].start == old_addr {
-            alloc_idx = i;
-            break;
-        }
-    }
-    
-    if alloc_idx == MAX_ALLOCS {
-        unlock_pmm();
-        return None;
-    }
-    
-    let current_alloc = (*pmm_ptr).allocations[alloc_idx];
-    let extension_start = current_alloc.start + (current_alloc.count as u64 * PAGE_SIZE);
-    let needed_extra = new_pages - current_alloc.count;
-    
-    if is_valid_ram(extension_start, needed_extra) {
-         if !is_overlap(extension_start, needed_extra) {
-             (*pmm_ptr).allocations[alloc_idx].count = new_pages;
-             unlock_pmm();
-             return Some(old_addr);
-         }
-    }
-    
-    unlock_pmm();
-    
-    if let Some(new_addr) = allocate_memory(new_bytes, pid) {
-        core::ptr::copy_nonoverlapping(old_addr as *const u8, new_addr as *mut u8, old_bytes);
-        free_frame(old_addr);
-        return Some(new_addr);
-    }
-
-    None
-}
-
 pub fn reserve_frame(addr: u64) -> bool {
     unsafe {
         lock_pmm();
@@ -308,6 +261,55 @@ pub fn free_frame(addr: u64) {
     unsafe {
         lock_pmm();
         remove_allocation(addr);
+        unlock_pmm();
+    }
+}
+
+pub fn free_frames_by_pid(pid: u64) {
+    unsafe {
+        lock_pmm();
+        let pmm_ptr = &raw mut PMM;
+        
+        let target_main = pid >> 32;
+        let target_child = pid & 0xFFFFFFFF;
+        
+        let mut i = 0;
+        while i < MAX_ALLOCS {
+            if (*pmm_ptr).allocations[i].used {
+                let alloc_pid = (*pmm_ptr).allocations[i].pid;
+                let alloc_main = alloc_pid >> 32;
+                // If target_child is 0, we delete everything with the matching Main PID.
+                // Otherwise, we require an exact match.
+                let should_free = if target_child == 0 {
+                    alloc_main == target_main
+                } else {
+                    alloc_pid == pid
+                };
+
+                if should_free {
+                    // Found one! Remove it.
+                    let count_used = {
+                        let mut c = 0;
+                        for k in 0..MAX_ALLOCS {
+                            if (*pmm_ptr).allocations[k].used { c += 1; }
+                        }
+                        c
+                    };
+                    
+                    for k in i..(count_used - 1) {
+                        (*pmm_ptr).allocations[k] = (*pmm_ptr).allocations[k+1];
+                    }
+                    (*pmm_ptr).allocations[count_used - 1].used = false;
+                    
+                    // Don't increment i, check this slot again
+                    continue;
+                }
+            } else {
+                break; 
+            }
+            i += 1;
+        }
+        
         unlock_pmm();
     }
 }

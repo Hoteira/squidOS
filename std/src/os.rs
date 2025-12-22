@@ -20,6 +20,27 @@ pub unsafe fn syscall(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     result
 }
 
+pub unsafe fn syscall4(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
+    let result: u64;
+
+    unsafe {
+        asm!(
+            "syscall",
+            in("rax") num,
+            in("rdi") arg1,
+            in("rsi") arg2,
+            in("rdx") arg3,
+            in("r10") arg4,
+            lateout("rax") result,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack, preserves_flags)
+        );
+    }
+
+    result
+}
+
 pub fn print(s: &str) {
     unsafe {
         syscall(1, s.as_ptr() as u64, s.len() as u64, 0);
@@ -41,7 +62,29 @@ pub fn read(buffer: &mut [u8]) -> usize {
     }
 }
 
+pub fn file_read(fd: usize, buffer: &mut [u8]) -> usize {
+    unsafe {
+        syscall(62, fd as u64, buffer.as_mut_ptr() as u64, buffer.len() as u64) as usize
+    }
+}
 
+pub fn file_write(fd: usize, buffer: &[u8]) -> usize {
+    unsafe {
+        syscall(63, fd as u64, buffer.as_ptr() as u64, buffer.len() as u64) as usize
+    }
+}
+
+pub fn pipe(fds: &mut [i32; 2]) -> i32 {
+    unsafe {
+        syscall(42, fds.as_mut_ptr() as u64, 0, 0) as i32
+    }
+}
+
+pub fn file_close(fd: usize) -> i32 {
+    unsafe {
+        syscall(67, fd as u64, 0, 0) as i32
+    }
+}
 
 pub fn exit(code: u64) -> ! {
 
@@ -53,4 +96,51 @@ pub fn exit(code: u64) -> ! {
 
     }
 
+}
+
+pub fn exec(path: &str) {
+    unsafe {
+        syscall(66, path.as_ptr() as u64, path.len() as u64, 0);
+    }
+}
+
+pub fn spawn(path: &str) -> usize {
+    unsafe {
+        syscall(66, path.as_ptr() as u64, path.len() as u64, 0) as usize
+    }
+}
+
+pub fn spawn_with_fds(path: &str, fds: &[(u8, u8)]) -> usize {
+    unsafe {
+        syscall4(66, path.as_ptr() as u64, path.len() as u64, fds.as_ptr() as u64, fds.len() as u64) as usize
+    }
+}
+
+pub fn waitpid(pid: usize) {
+    unsafe {
+        loop {
+            let status = syscall(68, pid as u64, 0, 0);
+            if status == 0 {
+                break;
+            }
+            // Yield is implicit in syscall if status == 1, but we loop here just in case.
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct PollFd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+pub const POLLIN: i16 = 0x001;
+pub const POLLOUT: i16 = 0x004;
+
+pub fn poll(fds: &mut [PollFd], timeout: i32) -> i32 {
+    unsafe {
+        syscall(70, fds.as_mut_ptr() as u64, fds.len() as u64, timeout as u64) as i32
+    }
 }

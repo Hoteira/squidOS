@@ -45,8 +45,7 @@ impl File {
 
 impl Drop for File {
     fn drop(&mut self) {
-        // We should add a SYS_CLOSE syscall eventually
-        // For now, nothing
+        crate::os::file_close(self.fd);
     }
 }
 

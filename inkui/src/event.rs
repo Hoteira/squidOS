@@ -13,6 +13,7 @@ pub struct MouseEvent {
 pub struct KeyboardEvent {
     pub wid: u32,
     pub key: u32,
+    pub repeat: u16,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

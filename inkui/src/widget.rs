@@ -59,6 +59,7 @@ pub struct WidgetGeometry {
     pub border_size: Size,
     
     pub scroll_offset_y: usize,
+    pub content_height: usize,
 }
 
 impl WidgetGeometry {
@@ -88,6 +89,7 @@ impl WidgetGeometry {
             border_radius: Size::Auto,
             border_size: Size::Auto,
             scroll_offset_y: 0,
+            content_height: 0,
         }
     }
 }
@@ -202,7 +204,7 @@ impl Widget {
             Widget::Label { background, .. } |
             Widget::TextInput { background, .. } |
             Widget::Canvas { background, .. } => {
-                *background = BackgroundStyle::solid(color);    
+                *background = BackgroundStyle::solid(color);
             }
             Widget::Image { .. } => {}
         }
@@ -255,6 +257,16 @@ impl Widget {
 
     pub fn set_border_radius(mut self, radius: Size) -> Self {
         self.geometry_mut().border_radius = radius;
+        self
+    }
+
+    pub fn set_border_size(mut self, size: Size) -> Self {
+        self.geometry_mut().border_size = size;
+        self
+    }
+
+    pub fn set_border_color(mut self, color: Color) -> Self {
+        self.geometry_mut().border_color = color;
         self
     }
 
@@ -323,10 +335,20 @@ impl Widget {
 
     pub fn handle_scroll(&mut self, delta: i8) {
         let geo = self.geometry_mut();
-        if delta < 0 { 
-            geo.scroll_offset_y = geo.scroll_offset_y.saturating_add((delta.abs() as usize) * 20);
+        let scroll_step = 20;
+        
+        // Inverted scrolling sense as requested
+        if delta > 0 { 
+            geo.scroll_offset_y = geo.scroll_offset_y.saturating_add((delta.abs() as usize) * scroll_step);
         } else { 
-            geo.scroll_offset_y = geo.scroll_offset_y.saturating_sub((delta as usize) * 20);
+            geo.scroll_offset_y = geo.scroll_offset_y.saturating_sub((delta.abs() as usize) * scroll_step);
+        }
+
+        // Lock scrolling so we cannot scroll past the latest filled line
+        // We add a small buffer (e.g. one line height ~ 20px) to ensure the last line is fully visible
+        let max_scroll = geo.content_height.saturating_sub(geo.height).saturating_add(20);
+        if geo.scroll_offset_y > max_scroll {
+            geo.scroll_offset_y = max_scroll;
         }
     }
 
@@ -491,13 +513,13 @@ impl Widget {
 
         geometry.margin = match geometry.user_margin {
             Size::Absolute(size) => size,
-            Size::Relative(size) => ceil_f32(parent_height as f32 * size as f32 / 100.0) as usize,
+            Size::Relative(size) => crate::math::floor_f32(parent_height as f32 * size as f32 / 100.0) as usize,
             _ => 0,
         };
 
         geometry.padding = match geometry.user_padding {
             Size::Absolute(size) => size,
-            Size::Relative(size) => ceil_f32(parent_height as f32 * size as f32 / 100.0) as usize,
+            Size::Relative(size) => crate::math::floor_f32(parent_height as f32 * size as f32 / 100.0) as usize,
             _ => 0,
         };
 
@@ -526,7 +548,7 @@ impl Widget {
         geometry.x = match geometry.user_x {
             Size::Absolute(size) => available_x + geometry.margin + size,
             Size::Relative(size) => {
-                available_x + geometry.margin + ceil_f32(available_width as f32 * size as f32 / 100.0) as usize
+                available_x + geometry.margin + crate::math::floor_f32(available_width as f32 * size as f32 / 100.0) as usize
             }
             Size::FromRight(size) => {
                  let right_edge = parent_x + parent_width - parent_padding - geometry.margin;
@@ -539,7 +561,7 @@ impl Widget {
         geometry.y = match geometry.user_y {
             Size::Absolute(size) => available_y + geometry.margin + size,
             Size::Relative(size) => {
-                available_y + geometry.margin + ceil_f32(available_height as f32 * size as f32 / 100.0) as usize
+                available_y + geometry.margin + crate::math::floor_f32(available_height as f32 * size as f32 / 100.0) as usize
             }
             Size::FromUp(size) => available_y + size + geometry.margin,
             Size::FromDown(size) => {
@@ -638,9 +660,6 @@ impl Widget {
                         let content_height = widget_height.saturating_sub(widget_padding * 2);
                         
                         for child in children.iter_mut() {
-                            // In Display::None, we pass the content box. 
-                            // The child's update_layout will add its own user_x/user_y to this base.
-                            // If user_x is 0, it will be at content_x.
                             child.update_layout(content_x, content_y, content_width, content_height, 0, _widget_margin, &Display::None);
                         }
                     }
@@ -680,10 +699,8 @@ use std::println;
 use crate::LinearGradient;
 
 impl Widget {
-    pub fn draw(&self, framebuffer: &mut [u32], buffer_width: usize, font: &mut Option<TrueTypeFont>) {
+    pub fn draw(&mut self, framebuffer: &mut [u32], buffer_width: usize, font: &mut Option<TrueTypeFont>) {
         if buffer_width == 0 { return; }
-
-        let geometry = self.geometry();
 
         match self {
             Widget::Image { geometry, rasterized_buffer, .. } => {
@@ -705,22 +722,15 @@ impl Widget {
                         let copy_width = img_w.min(buffer_width.saturating_sub(geometry.x + geometry.margin));
                         
                         if dest_start + copy_width <= framebuffer.len() && src_start + copy_width <= rasterized_buffer.len() {
-                            // Manual copy to enforce Alpha = 0xFF
                             for i in 0..copy_width {
                                 let pixel = rasterized_buffer[src_start + i];
-                                // Force Alpha (top 8 bits) to 0xFF
                                 framebuffer[dest_start + i] = pixel | 0xFF000000;
                             }
-                        } else {
-                             std::println!("Image Draw: Bounds check failed at row {}. dest_start={}, copy_width={}, fb_len={}, src_start={}, rast_len={}", 
-                                row, dest_start, copy_width, framebuffer.len(), src_start, rasterized_buffer.len());
                         }
                     }
-                } else {
-                    std::println!("Image Draw: Rasterized buffer is empty!");
                 }
             },
-            Widget::Frame { background, .. } => {
+            Widget::Frame { geometry, background, .. } => {
                 crate::graphics::primitives::draw_background_style(
                     framebuffer,
                     buffer_width,
@@ -729,10 +739,12 @@ impl Widget {
                     geometry.width,
                     geometry.height,
                     geometry.border_radius,
-                    background
+                    background,
+                    match geometry.border_size { Size::Absolute(s) => s, _ => 0 },
+                    geometry.border_color
                 );
             },
-            Widget::Button { background, text, focused, .. } => {
+            Widget::Button { geometry, background, text, focused, .. } => {
                 let mut display_bg = *background;
                 if *focused {
                      if let BackgroundStyle::Solid(mut c) = display_bg {
@@ -751,14 +763,16 @@ impl Widget {
                     geometry.width,
                     geometry.height,
                     geometry.border_radius,
-                    &display_bg
+                    &display_bg,
+                    match geometry.border_size { Size::Absolute(s) => s, _ => 0 },
+                    geometry.border_color
                 );
 
                 if let Some(font) = font {
                     if !text.text.is_empty() {
                         let text_y = geometry.y + geometry.margin + (geometry.height / 2) + (text.size / 3);
                         
-                        crate::graphics::primitives::draw_text_formatted(
+                        geometry.content_height = crate::graphics::primitives::draw_text_formatted(
                             framebuffer,
                             buffer_width,
                             geometry.x + geometry.margin + geometry.padding + 5,
@@ -775,7 +789,7 @@ impl Widget {
                     }
                 }
             },
-            Widget::Label { background, text, .. } => {
+            Widget::Label { geometry, background, text, .. } => {
                 let should_draw_bg = match background {
                     BackgroundStyle::Solid(c) => c.a > 0,
                     BackgroundStyle::Gradient(g) => g.start_color.a > 0 || g.end_color.a > 0,
@@ -790,15 +804,18 @@ impl Widget {
                         geometry.width,
                         geometry.height,
                         geometry.border_radius,
-                        background
+                        background,
+                        match geometry.border_size { Size::Absolute(s) => s, _ => 0 },
+                        geometry.border_color
                     );
                 }
 
                 if let Some(font) = font {
                     if !text.text.is_empty() {
-                        let text_y = geometry.y + geometry.margin + (geometry.height / 2) + (text.size / 3);
+                        // Top alignment for Label
+                        let text_y = geometry.y + geometry.margin + geometry.padding;
                         
-                        crate::graphics::primitives::draw_text_formatted(
+                        geometry.content_height = crate::graphics::primitives::draw_text_formatted(
                             framebuffer,
                             buffer_width,
                             geometry.x + geometry.margin + geometry.padding,
@@ -815,7 +832,7 @@ impl Widget {
                     }
                 }
             },
-            Widget::TextInput { background, text, focused, .. } => {
+            Widget::TextInput { geometry, background, text, focused, .. } => {
                 crate::graphics::primitives::draw_background_style(
                     framebuffer,
                     buffer_width,
@@ -824,7 +841,9 @@ impl Widget {
                     geometry.width,
                     geometry.height,
                     geometry.border_radius,
-                    background
+                    background,
+                    match geometry.border_size { Size::Absolute(s) => s, _ => 0 },
+                    geometry.border_color
                 );
 
                 if let Some(font) = font {
@@ -838,7 +857,7 @@ impl Widget {
                     
                     let text_y = geometry.y + geometry.margin + geometry.padding + text.size; 
 
-                    crate::graphics::primitives::draw_text_formatted(
+                    geometry.content_height = crate::graphics::primitives::draw_text_formatted(
                         framebuffer,
                         buffer_width,
                         geometry.x + geometry.margin + geometry.padding,
@@ -854,7 +873,20 @@ impl Widget {
                     );
                 }
             },
-            Widget::Canvas { framebuffer: widget_buffer, .. } => {
+            Widget::Canvas { geometry, framebuffer: widget_buffer, background, .. } => {
+                crate::graphics::primitives::draw_background_style(
+                    framebuffer,
+                    buffer_width,
+                    geometry.x + geometry.margin,
+                    geometry.y + geometry.margin,
+                    geometry.width,
+                    geometry.height,
+                    geometry.border_radius,
+                    background,
+                    match geometry.border_size { Size::Absolute(s) => s, _ => 0 },
+                    geometry.border_color
+                );
+
                 if !widget_buffer.is_empty() {
                     for row in 0..geometry.height {
                         let dest_start = (geometry.y + row) * buffer_width + geometry.x;
@@ -868,30 +900,6 @@ impl Widget {
                     }
                 }
             },
-            Widget::Image { geometry, rasterized_buffer, .. } => {
-                if !rasterized_buffer.is_empty() {
-                    let img_w = geometry.width;
-                    let img_h = geometry.height;
-                    
-                    // Center the image if it's smaller than the widget area? 
-                    // Current logic assumes image fills the widget (stretch).
-                    // We just copy it directly.
-                    
-                    for row in 0..img_h {
-                        let dest_y = geometry.y + geometry.margin + row;
-                        if dest_y >= framebuffer.len() / buffer_width { break; }
-                        
-                        let dest_start = dest_y * buffer_width + (geometry.x + geometry.margin);
-                        let src_start = row * img_w;
-                        
-                        let copy_width = img_w.min(buffer_width.saturating_sub(geometry.x + geometry.margin));
-                        
-                        if dest_start + copy_width <= framebuffer.len() && src_start + copy_width <= rasterized_buffer.len() {
-                            framebuffer[dest_start..dest_start+copy_width].copy_from_slice(&rasterized_buffer[src_start..src_start+copy_width]);
-                        }
-                    }
-                }
-            }
         }
     }
 

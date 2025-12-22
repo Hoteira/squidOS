@@ -15,6 +15,7 @@ pub struct MouseEvent {
 pub struct KeyboardEvent {
     pub wid: u32,
     pub key: u32,
+    pub repeat: u16,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -92,11 +93,20 @@ impl EventQueue {
         result
     }
 
-    pub fn add_event(&mut self, event: Event) {
+    pub fn add_event(&mut self, mut event: Event) {
+        if let Event::Keyboard(ref mut kb) = event {
+            // Ensure repeat is at least 1 (though caller should set it)
+            if kb.repeat == 0 { kb.repeat = 1; }
+
+            if let Some(Event::Keyboard(last_kb)) = self.queue.last_mut() {
+                if last_kb.wid == kb.wid && last_kb.key == kb.key {
+                    last_kb.repeat = last_kb.repeat.saturating_add(kb.repeat);
+                    return;
+                }
+            }
+        }
+
         if self.queue.len() >= self.queue.capacity() {
-            // Prevent allocation in interrupt context: Drop event if full
-            // Optionally, we could remove the oldest event?
-            // For now, just drop to avoid crash/deadlock.
             return;
         }
         self.queue.push(event);

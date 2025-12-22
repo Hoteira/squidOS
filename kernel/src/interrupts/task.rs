@@ -4,7 +4,7 @@ use crate::memory::{paging, pmm, vmm};
 
 #[allow(dead_code)]
 const STACK_SIZE: u64 = 64 * 1024;
-const MAX_TASKS: usize = 125;
+pub(crate) const MAX_TASKS: usize = 125;
 
 use alloc::vec::Vec;
 use alloc::boxed::Box;
@@ -18,6 +18,7 @@ pub struct Task {
     pub cpu_state_ptr: u64,
     pub state: TaskState,
     pub pml4_phys: u64,
+    pub fd_table: [i16; 16],
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -60,12 +61,14 @@ static NULL_TASK: Task = Task {
     cpu_state_ptr: 0,
     state: TaskState::Null,
     pml4_phys: 0,
+    fd_table: [-1; 16],
 };
 
 impl Task {
     pub fn init(&mut self, entry_point: u64, args: Option<&[u64]>) {
         self.state = TaskState::Ready;
         self.fpu_state = [0; 512];
+        self.fd_table = [-1; 16]; 
         // Set default FCW (0x037F)
         self.fpu_state[0] = 0x7F;
         self.fpu_state[1] = 0x03;
@@ -109,9 +112,10 @@ impl Task {
     }
 
     #[allow(dead_code)]
-    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>) {
+    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, pid: u64, fd_table: Option<[i16; 16]>) {
         self.state = TaskState::Ready;
         self.fpu_state = [0; 512];
+        self.fd_table = fd_table.unwrap_or([-1; 16]);
         // Set default FCW (0x037F)
         self.fpu_state[0] = 0x7F;
         self.fpu_state[1] = 0x03;
@@ -121,10 +125,11 @@ impl Task {
 
         self.pml4_phys = pml4_phys;
 
-        let k_frame = pmm::allocate_frames(16, 0).expect("Task init_user: OOM (kstack)");
+        // Use PID for allocation tracking
+        let k_frame = pmm::allocate_frames(16, pid).expect("Task init_user: OOM (kstack)");
         self.kernel_stack = k_frame + 4096 * 16;
 
-        let u_frame = pmm::allocate_frames(16, 0).expect("Task init_user: OOM (ustack)");
+        let u_frame = pmm::allocate_frames(16, pid).expect("Task init_user: OOM (ustack)");
         self.stack = u_frame; 
         
         let u_stack_top = u_frame + 4096 * 16; 
@@ -196,12 +201,15 @@ impl TaskManager {
     }
 
     #[allow(dead_code)]
-    pub fn add_user_task(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>) {
+    pub fn add_user_task(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, fd_table: Option<[i16; 16]>) -> usize {
         if self.task_count < MAX_TASKS {
             let free_slot = self.get_free_slot();
-            self.tasks[free_slot].init_user(entry_point, pml4_phys, args);
+            // Use free_slot as PID
+            self.tasks[free_slot].init_user(entry_point, pml4_phys, args, free_slot as u64, fd_table);
             self.task_count += 1;
+            return free_slot;
         }
+        usize::MAX
     }
 
     pub fn schedule(&mut self, cpu_state: *mut CPUState) -> (*mut CPUState, u64, u64) {
@@ -211,16 +219,9 @@ impl TaskManager {
             if self.tasks[self.current_task as usize].state == TaskState::Zombie {
                 let task = &mut self.tasks[self.current_task as usize];
                 
-                let k_frame = task.kernel_stack - 4096 * 16;
-                if k_frame != task.stack {
-                     // Assuming we have a way to free multiple frames, but pmm currently only has free_frame (single).
-                     // Ideally pmm should have free_frames(base, count).
-                     // For now, we loop or ignore. But since we use allocate_frames, we should free them.
-                     // The pmm allocation is tracked as a block. `remove_allocation` removes the whole block by start address.
-                     // So calling free_frame(addr) which calls remove_allocation(addr) works for the whole block!
-                     pmm::free_frame(k_frame);
-                }
-                pmm::free_frame(task.stack);
+                // Free ALL frames associated with this task PID (which is current_task index)
+                let pid = self.current_task as u64;
+                pmm::free_frames_by_pid(pid);
 
                 *task = NULL_TASK;
                 self.task_count -= 1;
@@ -334,7 +335,7 @@ pub extern "C" fn timer_handler() {
 #[unsafe(no_mangle)]
 pub extern "C" fn switch(rsp: u64) -> u64 {
     unsafe {
-        let mut tm = TASK_MANAGER.lock();
+        let mut tm = TASK_MANAGER.int_lock();
         
         // Save old task's FPU state
         if tm.current_task >= 0 {

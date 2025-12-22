@@ -50,6 +50,7 @@ pub fn init_mouse() {
     let id = mouse_read();
     
     unsafe {
+        // Force 4-byte packet mode as requested
         MOUSE_PACKET_SIZE = 4;
         println!("Mouse: ID: {}. Forcing 4-byte packet mode (Scroll Enabled).", id);
     }
@@ -92,40 +93,32 @@ const O: u32 = 0x0000_0000;
 const B: u32 = 0xFF00_0000;
 const T: u32 = 0xFFFF_FFFF;
 
-pub const CURSOR_BUFFER: [u32; 1024] = [
-    B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, T, B, B, B, B, B, B, B, B, B, B, B, B, B, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, T, B, B, B, B, B, B, B, B, B, B, B, B, B, B, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, T, B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
-    B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+pub const CURSOR_BUFFER: [u32; 576] = [
+    B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O, O,
+    B, B, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, B, B, B, O, O,
+    B, B, T, T, T, T, T, T, T, T, B, B, B, B, B, B, B, B, B, B, B, B, B, O,
+    B, B, T, T, T, T, T, T, T, B, B, B, B, B, B, B, B, B, B, B, B, B, B, O,
+    B, B, T, T, T, T, T, T, B, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
+    B, B, T, T, T, T, B, B, B, O, O, O, O, O, O, O, O, O, O, O, O, O, O, O,
 ];
 
-pub const CURSOR_WIDTH: usize = 32;
-pub const CURSOR_HEIGHT: usize = 32;
+pub const CURSOR_WIDTH: usize = CURSOR_BUFFER.len().isqrt();
+pub const CURSOR_HEIGHT: usize = CURSOR_BUFFER.len().isqrt();

@@ -67,11 +67,11 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
     tss::init_ists();
 
-    interrupts::task::TASK_MANAGER.lock().init();
+    interrupts::task::TASK_MANAGER.int_lock().init();
     
     unsafe { (*(&raw mut DISPLAY_SERVER)).init(); }
 
-    let first_user_task = interrupts::task::TASK_MANAGER.lock()
+    let first_user_task = interrupts::task::TASK_MANAGER.int_lock()
         .tasks.iter()
         .find(|t| t.state == interrupts::task::TaskState::Ready && t.kernel_stack != 0)
         .map(|t| t.kernel_stack);
@@ -92,7 +92,7 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     }
 
     crate::debugln!("Opening user file...");
-    let mut node = match crate::fs::vfs::open(0xE0, "user") {
+    let mut node = match crate::fs::vfs::open(0xE0, "user.elf") {
         Ok(node) => {
             crate::debugln!("File opened! Size: {}", node.size());
             node
@@ -119,7 +119,7 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
             
 
-            match crate::fs::elf::load_elf(&buf[0..n], pml4) {
+            match crate::fs::elf::load_elf(&buf[0..n], pml4, 0x04000000) {
 
                 Ok(entry) => {
 
@@ -127,8 +127,21 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
                     memory::pmm::free_frame(phys_addr);
 
-                    let _ = interrupts::task::TASK_MANAGER.lock().add_user_task(entry, pml4, None);
+                    let _ = interrupts::task::TASK_MANAGER.int_lock().add_user_task(entry, pml4, None, None);
 
+                    // Debug: List /sys/bin
+                    crate::debugln!("Debug: Listing @0xE0/sys/bin");
+                    if let Ok(mut bin_node) = crate::fs::vfs::open(0xE0, "sys/bin") {
+                        if let Ok(children) = bin_node.children() {
+                            for child in children {
+                                crate::debugln!(" - {}", child.name());
+                            }
+                        } else {
+                            crate::debugln!("Failed to get children of sys/bin");
+                        }
+                    } else {
+                        crate::debugln!("Failed to open sys/bin");
+                    }
                 },
 
                 Err(e) => {

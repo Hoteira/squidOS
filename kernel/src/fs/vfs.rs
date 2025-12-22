@@ -8,9 +8,9 @@ use alloc::string::ToString;
 pub static mut FILESYSTEMS: [Option<Box<dyn FileSystem>>; 256] = [const { None }; 256];
 pub static mut OPEN_FILES: [Option<FileHandle>; 256] = [const { None }; 256];
 
-pub struct FileHandle {
-    pub node: Box<dyn VfsNode>,
-    pub offset: u64,
+pub enum FileHandle {
+    File { node: Box<dyn VfsNode>, offset: u64 },
+    Pipe { pipe: crate::fs::pipe::Pipe },
 }
 
 pub fn init() {
@@ -35,7 +35,7 @@ pub fn open_file(disk_id: u8, path_str: &str) -> Result<usize, String> {
     unsafe {
         for i in 3..256 {
             if OPEN_FILES[i].is_none() {
-                OPEN_FILES[i] = Some(FileHandle { node, offset: 0 });
+                OPEN_FILES[i] = Some(FileHandle::File { node, offset: 0 });
                 return Ok(i);
             }
         }
@@ -122,6 +122,7 @@ pub trait FileSystem: Send + Sync {
     fn root(&mut self) -> Result<Box<dyn VfsNode>, String>;
 }
 
+
 pub trait VfsNode {
     fn name(&self) -> String;
     fn size(&self) -> u64;
@@ -132,4 +133,9 @@ pub trait VfsNode {
     
     fn children(&mut self) -> Result<Vec<Box<dyn VfsNode>>, String>;
     fn find(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String>;
+    
+    fn create_file(&mut self, _name: &str) -> Result<Box<dyn VfsNode>, String> { Err(String::from("Not supported")) }
+    fn create_dir(&mut self, _name: &str) -> Result<Box<dyn VfsNode>, String> { Err(String::from("Not supported")) }
+    fn remove(&mut self, _name: &str) -> Result<(), String> { Err(String::from("Not supported")) }
+    fn rename(&mut self, _old_name: &str, _new_name: &str) -> Result<(), String> { Err(String::from("Not supported")) }
 }

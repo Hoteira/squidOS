@@ -1,5 +1,7 @@
 [workspace]
-members = [
+members = ["apps/term",
+    "apps/shell",
+    "apps/tmap",
     "elfic",
     "inkui",
     "kernel",

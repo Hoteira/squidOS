@@ -61,16 +61,25 @@ pub extern "x86-interrupt" fn invalid_opcode(info: &mut StackFrame) {
     serial_println("\n=== INVALID OPCODE ===");
     serial_print("RIP: ");
     print_hex(info.instruction_pointer);
-    serial_print("\r\nCS: ");
-    print_hex(info.code_segment);
-    serial_print("\r\nRFLAGS: ");
-    print_hex(info.cpu_flags);
-    serial_print("\r\nRSP: ");
-    print_hex(info.stack_pointer);
-    serial_print("\r\nSS: ");
-    print_hex(info.stack_segment);
     serial_println("");
-    loop {}
+
+    if (info.code_segment & 3) == 3 {
+        // User mode crash
+        serial_println("User mode crash detected. Terminating task.");
+        {
+            let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            let current = tm.current_task;
+            if current >= 0 {
+                tm.tasks[current as usize].state = crate::interrupts::task::TaskState::Zombie;
+            }
+        }
+        unsafe {
+            core::arch::asm!("sti");
+            loop { core::arch::asm!("hlt"); }
+        }
+    } else {
+        loop {}
+    }
 }
 
 pub extern "x86-interrupt" fn double_fault(_info: &mut StackFrame, _error_code: u64) -> ! {
@@ -85,7 +94,23 @@ pub extern "x86-interrupt" fn general_protection_fault(info: &mut StackFrame, er
     serial_print("\r\nRIP: ");
     print_hex(info.instruction_pointer);
     serial_println("");
-    loop {}
+
+    if (info.code_segment & 3) == 3 {
+        serial_println("User mode GPF. Terminating task.");
+        {
+            let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            let current = tm.current_task;
+            if current >= 0 {
+                tm.tasks[current as usize].state = crate::interrupts::task::TaskState::Zombie;
+            }
+        }
+        unsafe {
+            core::arch::asm!("sti");
+            loop { core::arch::asm!("hlt"); }
+        }
+    } else {
+        loop {}
+    }
 }
 
 pub extern "x86-interrupt" fn page_fault(info: &mut StackFrame, error_code: u64) {
@@ -102,7 +127,23 @@ pub extern "x86-interrupt" fn page_fault(info: &mut StackFrame, error_code: u64)
     serial_print("\r\nRIP: ");
     print_hex(info.instruction_pointer);
     serial_println("");
-    loop {}
+
+    if (info.code_segment & 3) == 3 {
+        serial_println("User mode Page Fault. Terminating task.");
+        {
+            let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            let current = tm.current_task;
+            if current >= 0 {
+                tm.tasks[current as usize].state = crate::interrupts::task::TaskState::Zombie;
+            }
+        }
+        unsafe {
+            core::arch::asm!("sti");
+            loop { core::arch::asm!("hlt"); }
+        }
+    } else {
+        loop {}
+    }
 }
 
 pub extern "x86-interrupt" fn generic_handler(_info: &mut StackFrame) {
@@ -121,23 +162,34 @@ pub extern "x86-interrupt" fn keyboard_handler(_info: &mut StackFrame) {
     let scancode: u8 = inb(0x60);
 
     if let Some(key) = crate::drivers::periferics::keyboard::handle_scancode(scancode) {
-        crate::debugln!("Key pressed: {}", key);
-        
-        // 1. CLI Buffer
-        KEYBOARD_BUFFER.lock().push_back(key);
+        if crate::drivers::periferics::keyboard::is_super_active() {
+            // Global Shortcut Interception
+            crate::debugln!("Global Shortcut: Super + {}", key);
+            
+            // Example: Handle specific shortcuts here
+            // if key == 't' as u32 { spawn_terminal(); }
+            
+            // Do NOT forward to userland
+        } else {
+            crate::debugln!("Key pressed: {}", key);
+            
+            // 1. CLI Buffer
+            KEYBOARD_BUFFER.lock().push_back(key);
 
-        // 2. GUI Event Dispatch
-        unsafe {
-            let active_window_id = crate::window_manager::input::CLICKED_WINDOW_ID;
-            if active_window_id != 0 {
-                use crate::window_manager::events::{GLOBAL_EVENT_QUEUE, Event, KeyboardEvent};
-                
-                let event = Event::Keyboard(KeyboardEvent {
-                    wid: active_window_id as u32,
-                    key,
-                });
+            // 2. GUI Event Dispatch
+            unsafe {
+                let active_window_id = crate::window_manager::input::CLICKED_WINDOW_ID;
+                if active_window_id != 0 {
+                    use crate::window_manager::events::{GLOBAL_EVENT_QUEUE, Event, KeyboardEvent};
+                    
+                    let event = Event::Keyboard(KeyboardEvent {
+                        wid: active_window_id as u32,
+                        key,
+                        repeat: 1,
+                    });
 
-                (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(event);
+                    (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(event);
+                }
             }
         }
     }

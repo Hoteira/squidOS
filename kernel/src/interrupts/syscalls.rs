@@ -16,7 +16,6 @@ pub const SYS_READ: u64 = 0;
 pub const SYS_PRINT: u64 = 1;
 pub const SYS_MALLOC: u64 = 5;
 pub const SYS_FREE: u64 = 6;
-pub const SYS_REALLOC: u64 = 9;
 pub const SYS_COPY_TO_DB: u64 = 8;
 pub const SYS_ADD_WINDOW: u64 = 22;
 pub const SYS_REMOVE_WINDOW: u64 = 23;
@@ -24,6 +23,12 @@ pub const SYS_GET_WIDTH: u64 = 44;
 pub const SYS_GET_HEIGHT: u64 = 45;
 pub const SYS_UPDATE_WINDOW: u64 = 51;
 pub const SYS_EXIT: u64 = 60;
+
+pub const SYS_POLL: u64 = 70;
+pub const SYS_CREATE_FILE: u64 = 71;
+pub const SYS_CREATE_DIR: u64 = 72;
+
+static mut NEXT_LOAD_BASE: u64 = 0x08000000; // Start second process at 128MB
 
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -128,7 +133,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             let pages = (size + 4095) / 4096;
             
             let pid = {
-                let tm = crate::interrupts::task::TASK_MANAGER.lock();
+                let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
                 if tm.current_task >= 0 {
                     tm.current_task as u64
                 } else {
@@ -137,27 +142,6 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             };
 
             if let Some(addr) = crate::memory::pmm::allocate_frames(pages, pid) {
-                context.rax = addr;
-            } else {
-                context.rax = 0;
-            }
-        }
-
-        SYS_REALLOC => {
-            let old_ptr = context.rdi;
-            let old_size = context.rsi as usize;
-            let new_size = context.rdx as usize;
-            
-            let pid = {
-                let tm = crate::interrupts::task::TASK_MANAGER.lock();
-                if tm.current_task >= 0 {
-                    tm.current_task as u64
-                } else {
-                    0
-                }
-            };
-
-            if let Some(addr) = unsafe { crate::memory::pmm::realloc_memory(old_ptr, old_size, new_size, pid) } {
                 context.rax = addr;
             } else {
                 context.rax = 0;
@@ -253,40 +237,302 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
              
              let actual_path_str = if path_parts.len() > 1 { path_parts[1..].join("/") } else { String::from("") };
 
+             // 1. Open globally
              match crate::fs::vfs::open_file(disk_id, &actual_path_str) {
-                 Ok(fd) => context.rax = fd as u64,
+                 Ok(global_fd) => {
+                     // 2. Assign locally
+                     let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                     let current = tm.current_task;
+                     if current >= 0 {
+                         let task = &mut tm.tasks[current as usize];
+                         // Find free local slot
+                         let mut local_fd = -1;
+                         for i in 0..16 { // Reserve 0,1,2? No, let's just use all for now since 0,1 are Syscalls 0,1
+                             if task.fd_table[i] == -1 {
+                                 local_fd = i as i32;
+                                 break;
+                             }
+                         }
+
+                         if local_fd != -1 {
+                             task.fd_table[local_fd as usize] = global_fd as i16;
+                             context.rax = local_fd as u64;
+                         } else {
+                             // No local slots, close global (TODO: Implement close)
+                             context.rax = u64::MAX; 
+                         }
+                     } else {
+                         context.rax = global_fd as u64; // Fallback for kernel task?
+                     }
+                 },
                  Err(_) => context.rax = u64::MAX,
              }
         }
 
         62 => { // SYS_FILE_READ
-             let fd = context.rdi as usize;
+             let local_fd = context.rdi as usize;
              let buf_ptr = context.rsi as *mut u8;
              let len = context.rdx as usize;
-             let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
              
-             if let Some(handle) = crate::fs::vfs::get_file(fd) {
-                  debugln!("Syscall: Reading file fd {}, len {}", fd, len);
-                  match handle.node.read(handle.offset, buf) {
-                      Ok(n) => {
-                          handle.offset += n as u64;
-                          context.rax = n as u64;
-                          debugln!("Syscall: Read done, returned {} bytes", n);
-                      },
-                      Err(_) => context.rax = u64::MAX,
-                  }
+             if buf_ptr.is_null() { context.rax = u64::MAX; return; }
+             
+             // 1. Resolve Local -> Global
+             let global_fd_opt = {
+                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                 let current = tm.current_task;
+                 if current >= 0 && local_fd < 16 {
+                     let g = tm.tasks[current as usize].fd_table[local_fd];
+                     if g != -1 { Some(g as usize) } else { None }
+                 } else {
+                     None
+                 }
+             };
+
+             if let Some(fd) = global_fd_opt {
+                 let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
+                 
+                 if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                      use crate::fs::vfs::FileHandle;
+                      match handle {
+                          FileHandle::File { node, offset } => {
+                              match node.read(*offset, buf) {
+                                  Ok(n) => {
+                                      *offset += n as u64;
+                                      context.rax = n as u64;
+                                  },
+                                  Err(_) => context.rax = u64::MAX,
+                              }
+                          },
+                          FileHandle::Pipe { pipe } => {
+                              let n = pipe.read(buf);
+                              context.rax = n as u64;
+                          }
+                      }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
+             } else {
+                 context.rax = u64::MAX;
+             }
+        }
+
+        63 => { // SYS_FILE_WRITE
+             let local_fd = context.rdi as usize;
+             let buf_ptr = context.rsi as *const u8;
+             let len = context.rdx as usize;
+
+             if buf_ptr.is_null() { context.rax = u64::MAX; return; }
+
+             // 1. Resolve Local -> Global
+             let global_fd_opt = {
+                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                 let current = tm.current_task;
+                 if current >= 0 && local_fd < 16 {
+                     let g = tm.tasks[current as usize].fd_table[local_fd];
+                     if g != -1 { Some(g as usize) } else { None }
+                 } else {
+                     None
+                 }
+             };
+
+             if let Some(fd) = global_fd_opt {
+                 let buf = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
+                 
+                 if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                      use crate::fs::vfs::FileHandle;
+                      match handle {
+                          FileHandle::File { node, offset } => {
+                              match node.write(*offset, buf) {
+                                  Ok(n) => {
+                                      *offset += n as u64;
+                                      context.rax = n as u64;
+                                  },
+                                  Err(_) => context.rax = u64::MAX,
+                              }
+                          },
+                          FileHandle::Pipe { pipe } => {
+                              let n = pipe.write(buf);
+                              context.rax = n as u64;
+                          }
+                      }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
+             } else {
+                 context.rax = u64::MAX;
+             }
+        }
+
+        64 => { // SYS_GETDENTS
+             let local_fd = context.rdi as usize;
+             let buf_ptr = context.rsi as *mut u8;
+             let len = context.rdx as usize;
+             
+             if buf_ptr.is_null() { context.rax = u64::MAX; return; }
+
+             let global_fd_opt = {
+                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                 let current = tm.current_task;
+                 if current >= 0 && local_fd < 16 {
+                     let g = tm.tasks[current as usize].fd_table[local_fd];
+                     if g != -1 { Some(g as usize) } else { None }
+                 } else {
+                     None
+                 }
+             };
+
+             if let Some(fd) = global_fd_opt {
+                 if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                      use crate::fs::vfs::{FileHandle, FileType};
+                      match handle {
+                          FileHandle::File { node, offset } => {
+                              match node.children() {
+                                  Ok(children) => {
+                                      let start_idx = *offset as usize;
+                                      if start_idx >= children.len() {
+                                          context.rax = 0; // EOF
+                                      } else {
+                                          let mut bytes_written = 0;
+                                          let mut count = 0;
+                                          let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
+                                          
+                                          for child in children.iter().skip(start_idx) {
+                                              let name = child.name();
+                                              let name_bytes = name.as_bytes();
+                                              let name_len = name_bytes.len();
+                                              
+                                              // Check buffer space: 1 (type) + 1 (len) + name_len
+                                              if bytes_written + 2 + name_len > len {
+                                                  break;
+                                              }
+                                              
+                                              let type_byte = match child.kind() {
+                                                  FileType::File => 1,
+                                                  FileType::Directory => 2,
+                                                  FileType::Device => 3,
+                                                  _ => 0,
+                                              };
+                                              
+                                              buf[bytes_written] = type_byte;
+                                              buf[bytes_written + 1] = name_len as u8;
+                                              buf[bytes_written + 2 .. bytes_written + 2 + name_len].copy_from_slice(name_bytes);
+                                              
+                                              bytes_written += 2 + name_len;
+                                              count += 1;
+                                          }
+                                          
+                                          *offset += count as u64;
+                                          context.rax = bytes_written as u64;
+                                      }
+                                  },
+                                  Err(_) => context.rax = u64::MAX,
+                              }
+                          },
+                          FileHandle::Pipe { .. } => context.rax = u64::MAX, // Not a directory
+                      }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
              } else {
                  context.rax = u64::MAX;
              }
         }
 
         65 => { // SYS_FILE_SIZE
-             let fd = context.rdi as usize;
-             if let Some(handle) = crate::fs::vfs::get_file(fd) {
-                  context.rax = handle.node.size();
+             let local_fd = context.rdi as usize;
+             
+             let global_fd_opt = {
+                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                 let current = tm.current_task;
+                 if current >= 0 && local_fd < 16 {
+                     let g = tm.tasks[current as usize].fd_table[local_fd];
+                     if g != -1 { Some(g as usize) } else { None }
+                 } else {
+                     None
+                 }
+             };
+
+             if let Some(fd) = global_fd_opt {
+                 if let Some(handle) = crate::fs::vfs::get_file(fd) {
+                      use crate::fs::vfs::FileHandle;
+                      match handle {
+                          FileHandle::File { node, .. } => context.rax = node.size(),
+                          FileHandle::Pipe { .. } => context.rax = 0,
+                      }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
              } else {
                  context.rax = u64::MAX;
              }
+        }
+        
+        42 => { // SYS_PIPE
+            let fds_ptr = context.rdi as *mut i32;
+            if fds_ptr.is_null() { context.rax = u64::MAX; return; }
+            
+            unsafe {
+                use crate::fs::vfs::{OPEN_FILES, FileHandle};
+                use crate::fs::pipe::Pipe;
+                
+                let mut g1 = -1;
+                let mut g2 = -1;
+                
+                // 1. Find Global Slots
+                for i in 3..256 {
+                    if OPEN_FILES[i].is_none() {
+                        if g1 == -1 {
+                            g1 = i as i32;
+                        } else {
+                            g2 = i as i32;
+                            break;
+                        }
+                    }
+                }
+                
+                if g1 != -1 && g2 != -1 {
+                    // 2. Find Local Slots
+                    let mut l1 = -1;
+                    let mut l2 = -1;
+                    
+                    let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                    let current = tm.current_task;
+                    if current >= 0 {
+                        let task = &mut tm.tasks[current as usize];
+                        for i in 0..16 {
+                            if task.fd_table[i] == -1 {
+                                if l1 == -1 {
+                                    l1 = i as i32;
+                                } else {
+                                    l2 = i as i32;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if l1 != -1 && l2 != -1 {
+                        // Success!
+                        let pipe = Pipe::new();
+                        OPEN_FILES[g1 as usize] = Some(FileHandle::Pipe { pipe: pipe.clone() });
+                        OPEN_FILES[g2 as usize] = Some(FileHandle::Pipe { pipe });
+                        
+                        let task = &mut tm.tasks[current as usize];
+                        task.fd_table[l1 as usize] = g1 as i16;
+                        task.fd_table[l2 as usize] = g2 as i16;
+                        
+                        *fds_ptr.add(0) = l1;
+                        *fds_ptr.add(1) = l2;
+                        context.rax = 0;
+                    } else {
+                        // Rollback global (not needed since we didn't write to OPEN_FILES yet? 
+                        // Wait, we didn't write to OPEN_FILES yet. Good.)
+                         context.rax = u64::MAX; // EMFILE (Process)
+                    }
+                } else {
+                    context.rax = u64::MAX; // ENFILE (System)
+                }
+            }
         }
 
         53 => { // SYS_GET_MOUSE_POS
@@ -297,8 +543,276 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
         }
 
         SYS_EXIT => {
-            debugln!("[Syscall] Process exited with code {}", context.rdi + 0);
-            loop { unsafe { asm!("hlt") } }
+            let exit_code = context.rdi;
+            debugln!("[Syscall] Process exited with code {}", exit_code);
+            {
+                                    let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();                let current = tm.current_task;
+                if current >= 0 {
+                    tm.tasks[current as usize].state = crate::interrupts::task::TaskState::Zombie;
+                }
+            }
+            // Yield to schedule the next task
+            unsafe { core::arch::asm!("int 0x20"); }
+            loop { unsafe { core::arch::asm!("hlt"); } }
+        }
+
+
+        66 => { // SYS_SPAWN
+            let path_ptr = context.rdi as *const u8;
+            let path_len = context.rsi as usize;
+            let fd_map_ptr = context.rdx as *const (u8, u8); // child_fd, parent_fd
+            let fd_map_len = context.r10 as usize;
+
+            if path_ptr.is_null() || path_len == 0 {
+                context.rax = u64::MAX;
+                return;
+            }
+
+            let path_slice = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
+            let path_str = String::from_utf8_lossy(path_slice);
+
+            // 1. Parse Path
+            let path_parts: Vec<&str> = path_str.split('/').collect();
+             if path_parts.len() < 1 || !path_parts[0].starts_with('@') {
+                 context.rax = u64::MAX; 
+                 return;
+             }
+
+             let disk_part = &path_parts[0][1..];
+             let disk_id = if disk_part.starts_with("0x") || disk_part.starts_with("0X") {
+                 u8::from_str_radix(&disk_part[2..], 16).unwrap_or(0xFF)
+             } else {
+                 disk_part.parse::<u8>().unwrap_or(0xFF)
+             };
+             
+             let actual_path = if path_parts.len() > 1 { path_parts[1..].join("/") } else { String::from("") };
+
+             // 2. Read File
+             let mut file_buf = Vec::new();
+             if let Ok(mut node) = crate::fs::vfs::open(disk_id, &actual_path) {
+                 let size = node.size();
+                 if size > 0 {
+                     file_buf.resize(size as usize, 0);
+                     if let Ok(_) = node.read(0, &mut file_buf) {
+                         // Loaded.
+                     } else {
+                         context.rax = u64::MAX; return;
+                     }
+                 } else {
+                      context.rax = u64::MAX; return;
+                 }
+             } else {
+                 context.rax = u64::MAX; return;
+             }
+
+             // 3. Determine Load Base
+             let load_base = unsafe {
+                 let base = NEXT_LOAD_BASE;
+                 NEXT_LOAD_BASE += 0x01000000; // Increment by 16MB
+                 base
+             };
+             
+             // 4. Get PML4 (Shared for now)
+             let pml4_phys = unsafe { (*(&raw const crate::boot::BOOT_INFO)).pml4 };
+
+             // 5. Load ELF
+             match crate::fs::elf::load_elf(&file_buf, pml4_phys, load_base) {
+                 Ok(entry_point) => {
+                     // 6. Prepare FD Table
+                     let mut new_fd_table = [-1i16; 16];
+                     
+                     let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                     if tm.current_task >= 0 {
+                         let current_fds = tm.tasks[tm.current_task as usize].fd_table;
+                         
+                         if !fd_map_ptr.is_null() && fd_map_len > 0 {
+                             let map = unsafe { core::slice::from_raw_parts(fd_map_ptr, fd_map_len) };
+                             for &(child_fd, parent_fd) in map {
+                                 if (parent_fd as usize) < 16 && (child_fd as usize) < 16 {
+                                      new_fd_table[child_fd as usize] = current_fds[parent_fd as usize];
+                                 }
+                             }
+                         } else {
+                             // Inherit all if no map provided
+                             new_fd_table = current_fds;
+                         }
+                     }
+                     drop(tm); // Unlock before calling add_user_task (which locks)
+
+                     // 7. Create Task
+                     // Re-lock is handled by add_user_task? No, add_user_task is a method on TaskManager structure, 
+                     // but TASK_MANAGER is the mutex. 
+                     // Wait, `add_user_task` is method of `TaskManager`.
+                     // I need to lock `TASK_MANAGER` and call it.
+                     // But I dropped the lock above.
+                     
+                     let pid = {
+                         let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                         tm.add_user_task(entry_point, pml4_phys, None, Some(new_fd_table))
+                     };
+                     
+                     context.rax = pid as u64;
+                 },
+                 Err(e) => {
+                     crate::debugln!("Spawn Error: {}", e);
+                     context.rax = u64::MAX;
+                 }
+             }
+        }
+
+        67 => { // SYS_CLOSE
+        }
+
+        68 => { //SYS_WAIT_PID
+            let target_pid = context.rdi as usize;
+            let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            if target_pid < crate::interrupts::task::MAX_TASKS {
+                let state = tm.tasks[target_pid].state;
+                if state == crate::interrupts::task::TaskState::Ready {
+                    context.rax = 1; // Still running
+                } else {
+                    context.rax = 0; // Finished
+                }
+            } else {
+                context.rax = 0;
+            }
+        }
+
+        70 => { // SYS_POLL
+            let fds_ptr = context.rdi as *const PollFd;
+            let nfds = context.rsi as usize;
+            let timeout = context.rdx as i32; // Ignored for now (always non-blocking or simple yield)
+
+            if fds_ptr.is_null() || nfds == 0 {
+                context.rax = 0;
+                return;
+            }
+
+            let mut poll_fds = unsafe { core::slice::from_raw_parts(fds_ptr, nfds).to_vec() }; // Clone to avoid mutation issues/races if userspace
+            // Actually, we need to write back to revents.
+            // Let's iterate and write back directly.
+            
+            let mut ready_count = 0;
+            
+            {
+                let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+                let current = tm.current_task;
+                
+                if current >= 0 {
+                    let task = &tm.tasks[current as usize];
+                    
+                    for i in 0..nfds {
+                        unsafe {
+                            let pfd = &mut *(fds_ptr.add(i) as *mut PollFd);
+                            pfd.revents = 0;
+                            
+                            let fd = pfd.fd;
+                            if fd >= 0 && (fd as usize) < 16 {
+                                let global_fd = task.fd_table[fd as usize];
+                                if global_fd != -1 {
+                                    if let Some(handle) = crate::fs::vfs::get_file(global_fd as usize) {
+                                        use crate::fs::vfs::FileHandle;
+                                        match handle {
+                                            FileHandle::Pipe { pipe } => {
+                                                if (pfd.events & POLLIN) != 0 {
+                                                    if pipe.available() > 0 {
+                                                        pfd.revents |= POLLIN;
+                                                    }
+                                                }
+                                                if (pfd.events & POLLOUT) != 0 {
+                                                    // Always ready to write for now unless full?
+                                                    pfd.revents |= POLLOUT;
+                                                }
+                                            },
+                                            FileHandle::File { .. } => {
+                                                // Files always ready?
+                                                if (pfd.events & POLLIN) != 0 { pfd.revents |= POLLIN; }
+                                                if (pfd.events & POLLOUT) != 0 { pfd.revents |= POLLOUT; }
+                                            }
+                                        }
+                                    } else {
+                                        pfd.revents = POLLERR;
+                                    }
+                                } else {
+                                    pfd.revents = POLLNVAL;
+                                }
+                            } else {
+                                pfd.revents = POLLNVAL;
+                            }
+                            
+                            if pfd.revents != 0 {
+                                ready_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            context.rax = ready_count as u64;
+        }
+
+        71 | 72 => { // SYS_CREATE_FILE | SYS_CREATE_DIR
+             let ptr = context.rdi as *const u8;
+             let len = context.rsi as usize;
+             let s = unsafe { core::slice::from_raw_parts(ptr, len) };
+             let path_str_full = String::from_utf8_lossy(s);
+             
+             let path_parts: Vec<&str> = path_str_full.split('/').collect();
+             if path_parts.len() < 1 || !path_parts[0].starts_with('@') {
+                 context.rax = u64::MAX; 
+                 return;
+             }
+
+             let disk_part = &path_parts[0][1..];
+             let disk_id = if disk_part.starts_with("0x") || disk_part.starts_with("0X") {
+                 u8::from_str_radix(&disk_part[2..], 16).unwrap_or(0xFF)
+             } else {
+                 disk_part.parse::<u8>().unwrap_or(0xFF)
+             };
+
+             if disk_id == 0xFF {
+                 context.rax = u64::MAX;
+                 return;
+             }
+             
+             let actual_path = if path_parts.len() > 1 { path_parts[1..].join("/") } else { String::from("") };
+             
+             // Split parent and new name
+             if let Some(last_slash) = actual_path.rfind('/') {
+                 let parent_path = &actual_path[..last_slash];
+                 let new_name = &actual_path[last_slash+1..];
+                 
+                 if let Ok(mut parent) = crate::fs::vfs::open(disk_id, parent_path) {
+                     let res = if syscall_num == 71 {
+                         parent.create_file(new_name)
+                     } else {
+                         parent.create_dir(new_name)
+                     };
+                     
+                     match res {
+                         Ok(_) => context.rax = 0,
+                         Err(_) => context.rax = u64::MAX,
+                     }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
+             } else {
+                 // Root level? "file.txt" -> parent is root
+                 if let Ok(mut root) = crate::fs::vfs::open(disk_id, "") {
+                     let res = if syscall_num == 71 {
+                         root.create_file(&actual_path)
+                     } else {
+                         root.create_dir(&actual_path)
+                     };
+                     
+                     match res {
+                         Ok(_) => context.rax = 0,
+                         Err(_) => context.rax = u64::MAX,
+                     }
+                 } else {
+                     context.rax = u64::MAX;
+                 }
+             }
         }
         
         _ => {
@@ -307,3 +821,16 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct PollFd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+pub const POLLIN: i16 = 0x001;
+pub const POLLOUT: i16 = 0x004;
+pub const POLLERR: i16 = 0x008;
+pub const POLLNVAL: i16 = 0x020;

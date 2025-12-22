@@ -103,16 +103,12 @@ impl Window {
 
         if self.id == 0 {
             self.id = graphics::add_window(&std_window);
-            std::println!("Window ID assigned: {}", self.id);
         } else {
             graphics::update_window(&std_window);
         }
         
-        std::println!("Show: calling draw()...");
         self.draw();
-        std::println!("Show: calling update()...");
         self.update();
-        std::println!("Show: done.");
     }
 
     pub fn draw(&mut self) {
@@ -130,16 +126,13 @@ impl Window {
         
         buffer.fill(0);
         
-        std::println!("Draw: Layout pass starting...");
         for child in &mut self.children {
             child.update_layout(0, 0, self.width, self.height, 0, 0, &Display::None);
         }
 
-        std::println!("Draw: Paint pass starting...");
         for child in &mut self.children {
             paint_recursive(buffer, self.width, child, &mut self.font);
         }
-        std::println!("Draw: Paint pass complete.");
     }
 
     pub fn draw_widget(&mut self, _id: WidgetId) {
@@ -219,10 +212,6 @@ impl Window {
             syscall(52, self.id as u64, events.as_mut_ptr() as u64, 64);
         }
 
-        if events[0] != Event::None {
-             std::println!("Raw Event[0]: {:?}", events[0]);
-        }
-
         for event in events.iter() {
             match event {
                 Event::Resize(e) => {
@@ -262,7 +251,6 @@ impl Window {
                             }
                             
                             self.focus = new_id;
-                            std::println!("Focus set to: {}", new_id);
                             if let Some(new_w) = self.find_widget_by_id_mut(self.focus) {
                                 new_w.set_focused(true);
                                 self.draw_widget(self.focus);
@@ -311,13 +299,17 @@ impl Window {
                                     if e.key == 13 || e.key == 10 { 
                                         click_handler = *on_submit;
                                     } else if let Some(c) = char_opt {
-                                        widget.handle_key(c);
+                                        for _ in 0..e.repeat {
+                                            widget.handle_key(c);
+                                        }
                                         needs_redraw = true;
                                     }
                                 },
                                 _ => {
                                     if let Some(c) = char_opt {
-                                        widget.handle_key(c);
+                                        for _ in 0..e.repeat {
+                                            widget.handle_key(c);
+                                        }
                                         needs_redraw = true;
                                     }
                                 }
@@ -335,10 +327,12 @@ impl Window {
                     }
                     
                     if let Some(c) = char_opt {
-                        if c == '\x08' {
-                            if !key_buffer.is_empty() { key_buffer.pop(); }
-                        } else {
-                            key_buffer.push(c);
+                        for _ in 0..e.repeat {
+                            if c == '\x08' {
+                                if !key_buffer.is_empty() { key_buffer.pop(); }
+                            } else {
+                                key_buffer.push(c);
+                            }
                         }
                     }
                 },

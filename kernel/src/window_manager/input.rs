@@ -74,12 +74,19 @@ impl Mouse {
 
         let scroll_val = data[3] as i8;
 
+        if scroll_val != 0 {
+            debugln!("Mouse Scroll: {}", scroll_val);
+        }
+
         if self.left && !prev_left {
             let w = unsafe { (*(&raw mut COMPOSER)).find_window(self.x as usize, self.y as usize) };
             if let Some(ws) = w {
-                if ws.can_move && self.y as usize >= ws.y.max(0) as usize && self.y as usize <= (ws.y + 25).max(0) as usize {
+                let is_super = crate::drivers::periferics::keyboard::is_super_active();
+                
+                // Only drag if Super key is held, regardless of where in the window we click
+                if ws.can_move && is_super {
                     unsafe { 
-                        CLICK_STARTED_IN_TITLEBAR = true; 
+                        CLICK_STARTED_IN_TITLEBAR = true; // Variable name is legacy, implies "Drag Started"
                         CLICKED_WINDOW_ID = ws.id;
                     }
                 } else {

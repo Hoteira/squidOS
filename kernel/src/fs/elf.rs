@@ -36,15 +36,19 @@ unsafe fn virt_to_phys(pml4_phys: u64, virt: u64) -> Option<u64> {
     Some((page_entry & 0x000FFFFFFFFFF000) + (virt & 0xFFF))
 }
 
-pub fn load_elf(data: &[u8], target_pml4_phys: u64) -> Result<u64, alloc::string::String> {
+pub fn load_elf(data: &[u8], target_pml4_phys: u64, explicit_load_base: u64) -> Result<u64, alloc::string::String> {
 
     let elf = Elf64::new(data).map_err(|e| alloc::format!("ELF Parse Error: {:?}", e))?;
     let header_e_type = elf.header.e_type;
 
-
-
-    let load_base: u64 = if elf.header.e_type == 3 { 0x04000000 } else { 0 };
-
+    // Use explicit base if provided, otherwise default logic (though caller should manage this for PIE)
+    let load_base: u64 = if explicit_load_base > 0 {
+        explicit_load_base
+    } else if elf.header.e_type == 3 { 
+        0x04000000 
+    } else { 
+        0 
+    };
 
     if load_base > 0 {
 

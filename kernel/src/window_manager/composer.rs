@@ -53,7 +53,7 @@ impl Composer {
         let mx = x as isize;
         let my = y as isize;
         
-        for i in (0..self.windows.len()).rev() {
+        for i in 0..self.windows.len() {
             if mx >= self.windows[i].x
                 && mx <= (self.windows[i].x + self.windows[i].width as isize)
                 && my >= self.windows[i].y
@@ -197,7 +197,7 @@ impl Composer {
                         let row_offset = y as usize * pitch_u32;
                         let start_ptr = db_ptr.add(row_offset + start_x as usize);
                         let count = (end_x - start_x) as usize;
-                        core::ptr::write_bytes(start_ptr, 0, count * 4);
+                        // core::ptr::write_bytes(start_ptr, 0, count * 4);
                     }
                 }
             }
