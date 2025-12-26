@@ -58,33 +58,17 @@
     <list default="true" id="bf366474-e9be-4fff-b610-ea6d6eb6be02" name="Changes" comment=".">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/apps/taskbar/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/apps/taskbar/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/graphics/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/graphics/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/graphics/primitives.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/graphics/primitives.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/widget.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/widget.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inkui/src/window.rs" beforeDir="false" afterPath="$PROJECT_DIR$/inkui/src/window.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/debug.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/debug.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/pci.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/pci.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/video/framebuffer.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/video/framebuffer.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/cursor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/cursor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/mod.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/queue.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/drivers/video/virtio/queue.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/elf.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/elf.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/ext2/fs.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/pipe.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/pipe.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/fs/virtio.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/fs/virtio.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/exceptions.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/exceptions.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/idt.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/idt.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/syscalls.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/interrupts/task.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/interrupts/task.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/memory/pmm.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/memory/pmm.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kernel/src/memory/vmm.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/memory/vmm.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/tss.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/tss.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/composer.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/composer.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/display.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/display.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/events.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/events.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/kernel/src/window_manager/input.rs" beforeDir="false" afterPath="$PROJECT_DIR$/kernel/src/window_manager/input.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tree/sys/bin/taskbar.elf" beforeDir="false" afterPath="$PROJECT_DIR$/tree/sys/bin/taskbar.elf" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tree/sys/bin/term.elf" beforeDir="false" afterPath="$PROJECT_DIR$/tree/sys/bin/term.elf" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tree/user.elf" beforeDir="false" afterPath="$PROJECT_DIR$/tree/user.elf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -270,6 +254,7 @@
       <workItem from="1766395123007" duration="5965000" />
       <workItem from="1766560349047" duration="10656000" />
       <workItem from="1766687798575" duration="4644000" />
+      <workItem from="1766734285292" duration="10882000" />
     </task>
     <task id="LOCAL-00001" summary=".">
       <option name="closed" value="true" />

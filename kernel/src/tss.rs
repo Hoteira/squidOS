@@ -58,6 +58,9 @@ pub fn init_ists() {
 
         let ist2_frame = pmm::allocate_frame(0).expect("TSS: OOM for IST2");
         (*tss_struct).ist2 = ist2_frame + 4096;
+
+        let ist3_frame = pmm::allocate_frame(0).expect("TSS: OOM for IST3");
+        (*tss_struct).ist3 = ist3_frame + 4096;
         
 
     }

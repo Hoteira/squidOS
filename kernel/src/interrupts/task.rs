@@ -1,6 +1,7 @@
 use core::arch::{asm, naked_asm};
 
 use crate::memory::pmm;
+use crate::debugln;
 
 #[allow(dead_code)]
 const STACK_SIZE: u64 = 64 * 1024;
@@ -110,24 +111,34 @@ impl Task {
     }
 
     #[allow(dead_code)]
-    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, pid: u64, fd_table: Option<[i16; 16]>) {
-        self.state = TaskState::Ready;
+    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, pid: u64, fd_table: Option<[i16; 16]>) -> Result<(), pmm::FrameError> {
         self.fpu_state = [0; 512];
         self.fd_table = fd_table.unwrap_or([-1; 16]);
-        // Set default FCW (0x037F)
         self.fpu_state[0] = 0x7F;
         self.fpu_state[1] = 0x03;
-        // Set default MXCSR (0x1F80)
         self.fpu_state[24] = 0x80;
         self.fpu_state[25] = 0x1F;
 
         self.pml4_phys = pml4_phys;
 
         // Use PID for allocation tracking
-        let k_frame = pmm::allocate_frames(16, pid).expect("Task init_user: OOM (kstack)");
+        let k_frame = match pmm::allocate_frames(16, pid) {
+            Some(addr) => addr,
+            None => return Err(pmm::FrameError::NoMemory),
+        };
         self.kernel_stack = k_frame + 4096 * 16;
 
-        let u_frame = pmm::allocate_frames(16, pid).expect("Task init_user: OOM (ustack)");
+        let u_frame = match pmm::allocate_frames(16, pid) {
+            Some(addr) => addr,
+            None => {
+                pmm::free_frame(k_frame); // Actually need free_frames to be precise but free_frame works if we track allocations. 
+                // Wait, pmm::free_frame frees by address. pmm::allocate_frames returns start address. 
+                // We should use pmm::remove_allocation logic, which free_frame does.
+                // But wait, free_frame frees a single frame? No, it removes allocation by start address.
+                pmm::free_frame(k_frame);
+                return Err(pmm::FrameError::NoMemory);
+            }
+        };
         self.stack = u_frame; 
         
         let u_stack_top = u_frame + 4096 * 16; 
@@ -154,10 +165,12 @@ impl Task {
             (*state_ptr).rip = entry_point; 
             (*state_ptr).cs = 0x33;
             (*state_ptr).rflags = 0x202;
-            // Subtract 8 to ensure 16-byte alignment after call/push rbp
             (*state_ptr).rsp = u_stack_top - 8;
             (*state_ptr).ss = 0x23;
         }
+        
+        self.state = TaskState::Ready;
+        Ok(())
     }
 }
 
@@ -199,15 +212,20 @@ impl TaskManager {
     }
 
     #[allow(dead_code)]
-    pub fn add_user_task(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, fd_table: Option<[i16; 16]>) -> usize {
+    pub fn add_user_task(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, fd_table: Option<[i16; 16]>) -> Result<usize, pmm::FrameError> {
         if self.task_count < MAX_TASKS {
             let free_slot = self.get_free_slot();
             // Use free_slot as PID
-            self.tasks[free_slot].init_user(entry_point, pml4_phys, args, free_slot as u64, fd_table);
-            self.task_count += 1;
-            return free_slot;
+            match self.tasks[free_slot].init_user(entry_point, pml4_phys, args, free_slot as u64, fd_table) {
+                Ok(_) => {
+                    self.task_count += 1;
+                    Ok(free_slot)
+                },
+                Err(e) => Err(e),
+            }
+        } else {
+            Err(pmm::FrameError::NoMemory)
         }
-        usize::MAX
     }
 
     pub fn schedule(&mut self, cpu_state: *mut CPUState) -> (*mut CPUState, u64, u64) {

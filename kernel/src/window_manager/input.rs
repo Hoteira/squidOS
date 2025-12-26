@@ -118,7 +118,7 @@ impl Mouse {
                     (*(&raw mut RESIZING_WINDOW)).store(0, Ordering::Relaxed);
 
                     if w.event_handler != 0 {
-                        (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(Event::Resize(ResizeEvent {
+                        GLOBAL_EVENT_QUEUE.int_lock().add_event(Event::Resize(ResizeEvent {
                             wid: w.id as u32,
                             width: W_WIDTH,
                             height: W_HEIGHT,
@@ -398,7 +398,7 @@ impl Mouse {
                         scroll: scroll_val,
                     });
                     
-                    (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(event);
+                    GLOBAL_EVENT_QUEUE.int_lock().add_event(event);
                     
                     if self.left {
                         crate::debugln!("Input: Dispatching Mouse Event to {}", w.id);

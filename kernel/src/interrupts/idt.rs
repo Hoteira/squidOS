@@ -89,6 +89,7 @@ impl Idt {
         self.entries[8].set_ist(1); 
 
         self.entries[13].set(crate::interrupts::exceptions::general_protection_fault as u64);
+        self.entries[13].set_ist(3);
 
         self.entries[14].set(crate::interrupts::exceptions::page_fault as u64);
         self.entries[14].set_ist(2);

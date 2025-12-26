@@ -61,9 +61,7 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
     
     crate::fs::vfs::init();
     
-    unsafe {
-        (*(&raw mut window_manager::events::GLOBAL_EVENT_QUEUE)).init();
-    }
+    window_manager::events::GLOBAL_EVENT_QUEUE.lock().init();
 
     tss::init_ists();
 
@@ -127,7 +125,9 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
                     memory::pmm::free_frame(phys_addr);
 
-                    let _ = interrupts::task::TASK_MANAGER.int_lock().add_user_task(entry, pml4, None, None);
+                    if let Err(_) = interrupts::task::TASK_MANAGER.int_lock().add_user_task(entry, pml4, None, None) {
+                         panic!("Failed to spawn first user task");
+                    }
 
                     // Debug: List /sys/bin
                     crate::debugln!("Debug: Listing @0xE0/sys/bin");

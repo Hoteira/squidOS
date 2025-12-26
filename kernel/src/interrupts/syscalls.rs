@@ -103,12 +103,15 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
             }
 
             // 7. Create Task
-            let pid = {
+            let pid_res = {
                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
                 tm.add_user_task(entry_point, pml4_phys, None, Some(new_fd_table))
             };
             
-            Ok(pid as u64)
+            match pid_res {
+                Ok(pid) => Ok(pid as u64),
+                Err(_) => Err(String::from("Failed to create task (OOM?)")),
+            }
         },
         Err(e) => Err(e),
     }
@@ -171,6 +174,7 @@ pub extern "C" fn syscall_entry() {
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
     let syscall_num = context.rax;
+    // if syscall_num != 0 && syscall_num != 53 { crate::debugln!("Syscall Entry: {}", syscall_num); } // Filter read/mouse noise
     context.rax = 0; // Default return value
 
     match syscall_num {
@@ -266,7 +270,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             
             unsafe {
                 use crate::window_manager::events::GLOBAL_EVENT_QUEUE;
-                let events = (*(&raw mut GLOBAL_EVENT_QUEUE)).get_and_remove_events(wid, max_events);
+                let events = GLOBAL_EVENT_QUEUE.lock().get_and_remove_events(wid, max_events);
                 
                 if !events.is_empty() {
                     // crate::debugln!("Syscall: Get events for wid {}, count {}", wid, events.len());
@@ -1011,6 +1015,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
             context.rax = u64::MAX;
         }
     }
+    // if syscall_num != 0 && syscall_num != 53 { crate::debugln!("Syscall Exit: {}", syscall_num); }
 }
 
 #[derive(Debug, Clone, Copy)]

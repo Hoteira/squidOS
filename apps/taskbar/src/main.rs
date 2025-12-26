@@ -33,6 +33,7 @@ pub extern "C" fn _start() -> ! {
     let screen_h = 45; 
 
     let mut win = Window::new("Taskbar", screen_w, screen_h);
+    win.w_type = std::graphics::Items::Bar;
     win.x = 0;
     win.y = 0;
 

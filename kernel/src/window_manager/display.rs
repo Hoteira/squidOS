@@ -220,6 +220,8 @@ impl DisplayServer {
         let end_x = (x + width as i32).min(screen_w);
         let end_y = (y + height as i32).min(screen_h);
 
+        if buffer == 0 { return; }
+
         if end_x <= dst_x || end_y <= dst_y { return; }
 
         let copy_width = (end_x - dst_x) as usize;
@@ -290,6 +292,8 @@ impl DisplayServer {
         let intersect_end_x = (win_x + win_w).min(cx + cw).min(screen_w);
         let intersect_end_y = (win_y + win_h).min(cy + ch).min(screen_h);
 
+        if buffer == 0 { return; }
+
         if intersect_end_x <= intersect_x || intersect_end_y <= intersect_y {
             return;
         }
@@ -300,6 +304,21 @@ impl DisplayServer {
         // 2. Calculate Offsets
         let src_off_x = (intersect_x - win_x) as usize;
         let src_off_y = (intersect_y - win_y) as usize;
+
+        // Safety Checks
+        let src_len = (width as usize) * (height as usize);
+        let src_end_offset = (src_off_y + copy_height - 1) * src_pitch + (src_off_x + copy_width);
+        if src_end_offset > src_len {
+            // crate::debugln!("Display: Clipping Source OOB! Req: {}, Len: {}", src_end_offset, src_len);
+            return;
+        }
+
+        let dst_len = (self.pitch as usize / 4) * (self.height as usize);
+        let dst_end_offset = (intersect_y as usize + copy_height - 1) * dst_pitch + (intersect_x as usize + copy_width);
+        if dst_end_offset > dst_len {
+             // crate::debugln!("Display: Clipping Dest OOB! Req: {}, Len: {}", dst_end_offset, dst_len);
+             return;
+        }
 
         unsafe {
             let src_base = buffer as *const u32;
@@ -355,6 +374,8 @@ impl DisplayServer {
         let dst_y = y.max(0);
         let end_x = (x + width as i32).min(screen_w);
         let end_y = (y + height as i32).min(screen_h);
+
+        if buffer == 0 { return; }
 
         if end_x <= dst_x || end_y <= dst_y { return; }
 
@@ -434,11 +455,16 @@ impl DisplayServer {
                 let pitch = self.pitch as usize;
                 let src = self.double_buffer as *const u8;
                 let dst = self.framebuffer as *mut u8; // Active buffer
+                let fb_len = (self.pitch * self.height) as usize;
                 
                 // 1. Sync RAM (DB -> FB) for this rect
                 for row in 0..sh {
                     let offset = (sy + row) as usize * pitch + sx as usize * bpp ;
-                    core::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), (sw * bpp as u32) as usize);
+                    let end_offset = offset + (sw * bpp as u32) as usize;
+                    
+                    if end_offset <= fb_len {
+                        core::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), (sw * bpp as u32) as usize);
+                    }
                 }
                 
                 // 2. Flush to GPU

@@ -1,5 +1,7 @@
 use super::window::{Window, Items, NULL_WINDOW};
 use crate::window_manager::display::DISPLAY_SERVER;
+use crate::window_manager::events::{Event, ResizeEvent, GLOBAL_EVENT_QUEUE};
+use crate::debugln;
 
 #[derive(Debug, Clone)]
 pub struct Composer {
@@ -80,6 +82,151 @@ impl Composer {
         None
     }
 
+    pub fn update_tiling(&mut self) {
+        let mut tiled_windows = [0usize; 16];
+        let mut tiled_count = 0;
+        
+        let mut bar_height = 0;
+        let mut bar_position_top = true;
+
+        for i in 0..self.windows.len() {
+            match self.windows[i].w_type {
+                Items::Window => {
+                     if tiled_count < 16 {
+                        tiled_windows[tiled_count] = self.windows[i].id;
+                        tiled_count += 1;
+                     }
+                },
+                Items::Bar => {
+                     bar_height = self.windows[i].height;
+                     if self.windows[i].y > 0 {
+                         bar_position_top = false;
+                     }
+                }
+                _ => {}
+            }
+        }
+
+        if tiled_count == 0 { return; }
+
+        let gap = 5;
+        let outer_gap = 5;
+        
+        let (screen_w, screen_h) = unsafe {
+            ((*(&raw mut DISPLAY_SERVER)).width as usize, (*(&raw mut DISPLAY_SERVER)).height as usize)
+        };
+
+        let mut work_x = outer_gap;
+        let mut work_y = outer_gap;
+        let mut work_w = screen_w.saturating_sub(outer_gap * 2);
+        let mut work_h = screen_h.saturating_sub(outer_gap * 2);
+
+        if bar_height > 0 {
+            if bar_position_top {
+                work_y += bar_height;
+                work_h = work_h.saturating_sub(bar_height);
+            } else {
+                work_h = work_h.saturating_sub(bar_height);
+            }
+        }
+
+        debugln!("Tiling: Count={}, Work={}x{} @ {},{}", tiled_count, work_w, work_h, work_x, work_y);
+
+        let count = tiled_count;
+        
+        for i in 0..count {
+            let wid = tiled_windows[i];
+            
+            let (tx, ty, tw, th) = if count == 1 {
+                (work_x, work_y, work_w.max(1), work_h.max(1))
+            } else {
+                let master_width = (work_w / 2).max(1);
+                let stack_width = work_w.saturating_sub(master_width);
+                
+                if i == 0 {
+                    let safe_w = (master_width.saturating_sub(gap / 2)).max(1);
+                    (work_x, work_y, safe_w, work_h.max(1))
+                } else {
+                    let stack_count = count - 1;
+                    let stack_index = i - 1;
+                    let stack_h = work_h / stack_count;
+                    let this_h = if stack_index == stack_count - 1 {
+                        work_h - (stack_h * (stack_count - 1))
+                    } else {
+                        stack_h
+                    };
+                    
+                    let sx = work_x + master_width + (gap / 2);
+                    let sy = work_y + (stack_index * stack_h);
+                    
+                    let (final_sy, final_h) = if stack_count > 1 {
+                        if stack_index == 0 {
+                            (sy, this_h.saturating_sub(gap/2))
+                        } else if stack_index == stack_count - 1 {
+                            (sy + gap/2, this_h.saturating_sub(gap/2))
+                        } else {
+                            (sy + gap/2, this_h.saturating_sub(gap))
+                        }
+                    } else {
+                        (sy, this_h)
+                    };
+
+                    // Ensure dimensions are at least 1x1
+                    let safe_w = (stack_width.saturating_sub(gap / 2)).max(1);
+                    let safe_h = final_h.max(1);
+
+                    (sx, final_sy, safe_w, safe_h)
+                }
+            };
+
+            debugln!("  Win {}: ID={} -> {}x{} @ {},{}", i, wid, tw, th, tx, ty);
+
+            // Apply to window
+            let mut win_idx = None;
+            for idx in 0..self.windows.len() {
+                if self.windows[idx].id == wid {
+                    win_idx = Some(idx);
+                    break;
+                }
+            }
+
+            if let Some(idx) = win_idx {
+                debugln!("    Applying to idx {}", idx);
+                let current_w = self.windows[idx].width;
+                let current_h = self.windows[idx].height;
+
+                // Update Position Only
+                self.windows[idx].x = tx as isize;
+                self.windows[idx].y = ty as isize;
+                self.windows[idx].can_move = false;
+                self.windows[idx].can_resize = false;
+
+                // Send Event if size TARGET changed
+                if current_w != tw || current_h != th {
+                    debugln!("    Size changed ({}x{} -> {}x{}), sending event...", current_w, current_h, tw, th);
+                    debugln!("    Acquiring Event Queue Lock...");
+                    // let mut queue = GLOBAL_EVENT_QUEUE.lock();
+                    debugln!("    Lock acquired. Adding event...");
+                    // queue.add_event(Event::Resize(ResizeEvent {
+                    //     wid: wid as u32,
+                    //     width: tw,
+                    //     height: th,
+                    // }));
+                    debugln!("    Event added. Lock dropping...");
+                    // drop(queue);
+                    debugln!("    Event sent (SKIPPED).");
+                }
+            } else {
+                debugln!("    Window ID {} not found!", wid);
+            }
+        }
+        
+        
+        // Batch Redraw: Update the entire tiling workspace once.
+        // This clears the background and redraws all windows at their new positions.
+        self.update_window_area_rect(work_x as i32, work_y as i32, work_w as u32, work_h as u32);
+    }
+
     pub fn check_id(&self, _rng_seed: u64) -> usize {
         static mut NEXT_ID: usize = 1;
         unsafe {
@@ -122,17 +269,9 @@ impl Composer {
                 },
                 Items::Null => {},
                 _ => {
-                    // Push other windows back, ensuring they don't conflict with Z=0 or Z=1 (if new window is Z=1)
-                    // If we just added a Z=1 window, we want existing Z=1 to become Z=2.
-                    // If we just added a Z=0 Bar, we want existing Z=1 to stay Z=1?
-                    // Simplify: Just increment standard windows.
-                    
                     if wtype == Items::Bar || wtype == Items::Popup {
-                        // Adding a Bar (Z=0). Existing windows (>=1) can stay put? 
-                        // Or if they were 0 (invalid state), move to 1.
                         if self.windows[i].z == 0 { self.windows[i].z = 1; }
                     } else {
-                         // Adding a Window (Z=1). Existing windows (>=1) must move back.
                          self.windows[i].z = self.windows[i].z.saturating_add(1);
                     }
                 }
@@ -140,17 +279,96 @@ impl Composer {
         }
 
         self.windows.sort_by_key(|w| w.z);
+        debugln!("add_window: sorted, updating tiling...");
+        self.update_tiling();
+        debugln!("add_window: tiling updated, returning ID.");
         w.id
     }
 
     pub fn resize_window(&mut self, w: Window) {
         for i in 0..self.windows.len() {
             if w.id == self.windows[i].id {
+                let old_w = self.windows[i].width;
+                let old_h = self.windows[i].height;
+                
+                // Update Size and Buffer
                 self.windows[i].width = w.width;
                 self.windows[i].height = w.height;
                 self.windows[i].buffer = w.buffer;
-                self.windows[i].can_move = w.can_move;
+                
+                // For Tiled windows, IGNORE position from user/app to prevent snapping
+                if self.windows[i].w_type != Items::Window {
+                    self.windows[i].x = w.x;
+                    self.windows[i].y = w.y;
+                    self.windows[i].can_move = w.can_move;
+                } else {
+                    self.windows[i].can_move = false;
+                    // Keep existing X/Y set by update_tiling
+                }
+
+                // Redraw
+                let current_x = self.windows[i].x;
+                let current_y = self.windows[i].y;
+                let u_max_x = (current_x + old_w as isize).max(current_x + w.width as isize);
+                let u_max_y = (current_y + old_h as isize).max(current_y + w.height as isize);
+                
+                let dirty_w = (u_max_x - current_x).max(0) as u32;
+                let dirty_h = (u_max_y - current_y).max(0) as u32;
+
+                if dirty_w > 0 && dirty_h > 0 {
+                    self.update_window_area_rect(current_x as i32, current_y as i32, dirty_w, dirty_h);
+                }
             }
+        }
+    }
+
+    pub fn update_window_area_rect(&mut self, dirty_x: i32, dirty_y: i32, dirty_w: u32, dirty_h: u32) {
+        unsafe {
+            let display_server = &mut *(&raw mut DISPLAY_SERVER);
+            
+            // 1. Clear the area in the double buffer (fill with black or background)
+            if display_server.double_buffer != 0 {
+                let db_ptr = display_server.double_buffer as *mut u32;
+                let pitch_u32 = (display_server.pitch / 4) as usize;
+                let height = display_server.height as i32;
+                let width = display_server.width as i32;
+
+                let start_x = dirty_x.max(0);
+                let start_y = dirty_y.max(0);
+                let end_x = (dirty_x + dirty_w as i32).min(width);
+                let end_y = (dirty_y + dirty_h as i32).min(height);
+
+                if end_x > start_x && end_y > start_y {
+                    for y in start_y..end_y {
+                        let row_offset = y as usize * pitch_u32;
+                        let start_ptr = db_ptr.add(row_offset + start_x as usize);
+                        let count = (end_x - start_x) as usize;
+                        // Fill with black (0xFF000000 for opaque black) or 0 for transparent/black
+                        core::ptr::write_bytes(start_ptr, 0, count);
+                    }
+                }
+            }
+            
+            // 2. Redraw all windows overlapping this rect
+            for i in (0..self.windows.len()).rev() {
+                match self.windows[i].w_type {
+                    Items::Null => {}
+                    _ => {
+                        let w = &self.windows[i];
+                        display_server.copy_to_db_clipped(
+                            w.width as u32,
+                            w.height as u32,
+                            w.buffer,
+                            w.x as i32,
+                            w.y as i32,
+                            dirty_x, dirty_y, dirty_w, dirty_h
+                        );
+                    }
+                }
+            }
+
+            // 3. Present
+            display_server.present_rect(dirty_x, dirty_y, dirty_w, dirty_h);
         }
     }
 
@@ -282,5 +500,6 @@ impl Composer {
 
             (*(&raw mut DISPLAY_SERVER)).copy();
         }
+        self.update_tiling();
     }
 }

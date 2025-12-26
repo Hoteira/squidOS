@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(C)]
@@ -56,67 +57,111 @@ impl Event {
     }
 }
 
-pub static mut GLOBAL_EVENT_QUEUE: EventQueue = EventQueue { queue: Vec::new() };
+pub const QUEUE_SIZE: usize = 256;
 
 pub struct EventQueue {
-    pub queue: Vec<Event>,
+    pub queue: [Event; QUEUE_SIZE],
+    pub head: usize, // Write
+    pub tail: usize, // Read
+    pub count: usize,
 }
 
+pub static GLOBAL_EVENT_QUEUE: Mutex<EventQueue> = Mutex::new(EventQueue {
+    queue: [Event::None; QUEUE_SIZE],
+    head: 0,
+    tail: 0,
+    count: 0,
+});
+
 impl EventQueue {
-    pub fn get_and_remove_events(&mut self, window_id: u32, max_events: usize) -> Vec<Event> {
-        let mut result = Vec::with_capacity(max_events.min(self.queue.len()));
-        let mut write_idx = 0;
-        let mut read_idx = 0;
-
-        while read_idx < self.queue.len() && result.len() < max_events {
-            if self.queue[read_idx].get_window_id() == window_id {
-                result.push(self.queue[read_idx]);
-                read_idx += 1;
-            } else {
-                if write_idx != read_idx {
-                    self.queue[write_idx] = self.queue[read_idx];
-                }
-                write_idx += 1;
-                read_idx += 1;
-            }
-        }
-
-        while read_idx < self.queue.len() {
-            if write_idx != read_idx {
-                self.queue[write_idx] = self.queue[read_idx];
-            }
-            write_idx += 1;
-            read_idx += 1;
-        }
-
-        self.queue.truncate(write_idx);
-        result
+    pub fn init(&mut self) {
+        // No-op for static array
     }
 
     pub fn add_event(&mut self, mut event: Event) {
         if let Event::Keyboard(ref mut kb) = event {
-            // Ensure repeat is at least 1 (though caller should set it)
             if kb.repeat == 0 { kb.repeat = 1; }
-
-            if let Some(Event::Keyboard(last_kb)) = self.queue.last_mut() {
-                if last_kb.wid == kb.wid && last_kb.key == kb.key {
-                    last_kb.repeat = last_kb.repeat.saturating_add(kb.repeat);
-                    return;
+            
+            // Check last event for repeat (peeking backwards from head)
+            if self.count > 0 {
+                let last_idx = if self.head == 0 { QUEUE_SIZE - 1 } else { self.head - 1 };
+                if let Event::Keyboard(ref mut last_kb) = self.queue[last_idx] {
+                    if last_kb.wid == kb.wid && last_kb.key == kb.key {
+                        last_kb.repeat = last_kb.repeat.saturating_add(kb.repeat);
+                        return;
+                    }
                 }
             }
         }
 
-        if self.queue.len() >= self.queue.capacity() {
+        if self.count >= QUEUE_SIZE {
+            // Queue full, drop event
             return;
         }
-        self.queue.push(event);
+
+        self.queue[self.head] = event;
+        self.head = (self.head + 1) % QUEUE_SIZE;
+        self.count += 1;
+    }
+
+    pub fn get_and_remove_events(&mut self, window_id: u32, max_events: usize) -> Vec<Event> {
+        let mut result = Vec::with_capacity(max_events);
+        
+        // Scan queue
+        let mut processed_count = 0;
+        let initial_count = self.count;
+        let mut current_idx = self.tail;
+        
+        // We can't easily remove from middle of ring buffer without shifting.
+        // For simplicity: Create a new queue in place?
+        // Or just extract what we need and rebuild?
+        // Rebuilding in place is tricky with ring buffer wrapping.
+        
+        // Simpler approach:
+        // Iterate current queue. If event matches, take it. If not, keep it.
+        // We will reconstruct the queue in a temporary buffer or just compact it?
+        // Compacting in-place:
+        
+        if self.count == 0 { return result; }
+
+        // We need to compact the ring buffer.
+        // Since we are inside a Mutex, we have exclusive access.
+        // Let's linearize for simplicity if needed, or just smart shift.
+        
+        // Strategy: Two pointers. Read from `tail`, Write to `tail`.
+        // Wait, 'tail' moves forward.
+        
+        let mut new_count = 0;
+        let mut read_ptr = self.tail;
+        let mut write_ptr = self.tail;
+        
+        for _ in 0..self.count {
+            let evt = self.queue[read_ptr];
+            
+            let mut taken = false;
+            if evt.get_window_id() == window_id && result.len() < max_events {
+                result.push(evt);
+                taken = true;
+            }
+            
+            if !taken {
+                self.queue[write_ptr] = evt;
+                write_ptr = (write_ptr + 1) % QUEUE_SIZE;
+                new_count += 1;
+            }
+            
+            read_ptr = (read_ptr + 1) % QUEUE_SIZE;
+        }
+        
+        self.head = write_ptr;
+        self.count = new_count;
+        
+        result
     }
 
     pub fn reset_queue(&mut self) {
-        self.queue.clear();
-    }
-    
-    pub fn init(&mut self) {
-        self.queue.reserve(2048);
+        self.head = 0;
+        self.tail = 0;
+        self.count = 0;
     }
 }

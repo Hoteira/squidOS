@@ -24,25 +24,25 @@ fn serial_println(s: &str) {
     serial_print("\r\n");
 }
 
-fn print_hex(mut n: u64) {
+fn print_hex(n: u64) {
     serial_print("0x");
     if n == 0 {
         serial_print("0");
         return;
     }
-    let mut buffer = [0u8; 20];
-    let mut i = 0;
-    while n > 0 {
-        let digit = (n % 16) as u8;
-        buffer[i] = if digit < 10 { b'0' + digit } else { b'a' + (digit - 10) };
-        n /= 16;
-        i += 1;
-    }
-    while i > 0 {
-        i -= 1;
-        let c = buffer[i];
-        while (inb(0x3F8 + 5) & 0x20) == 0 {}
-        outb(0x3F8, c);
+    
+    // Iterate 16 nibbles (64 bits), skipping leading zeros
+    let mut leading = true;
+    for i in (0..16).rev() {
+        let shift = i * 4;
+        let nibble = (n >> shift) & 0xF;
+        
+        if nibble != 0 || !leading || i == 0 {
+            leading = false;
+            let c = if nibble < 10 { b'0' + nibble as u8 } else { b'a' + (nibble as u8 - 10) };
+            while (inb(0x3F8 + 5) & 0x20) == 0 {}
+            outb(0x3F8, c);
+        }
     }
 }
 
@@ -77,7 +77,10 @@ pub extern "x86-interrupt" fn invalid_opcode(info: &mut StackFrame) {
             loop { core::arch::asm!("hlt"); }
         }
     } else {
-        loop {}
+        unsafe {
+            core::arch::asm!("cli");
+            loop { core::arch::asm!("hlt"); }
+        }
     }
 }
 
@@ -87,12 +90,14 @@ pub extern "x86-interrupt" fn double_fault(_info: &mut StackFrame, _error_code: 
 }
 
 pub extern "x86-interrupt" fn general_protection_fault(info: &mut StackFrame, error_code: u64) {
-    serial_println("=== GENERAL PROTECTION FAULT===");
+    serial_print("\r\n=== GENERAL PROTECTION FAULT ===\r\n");
     serial_print("Error Code: ");
     print_hex(error_code);
     serial_print("\r\nRIP: ");
     print_hex(info.instruction_pointer);
-    serial_println("");
+    serial_print("\r\nRSP: ");
+    print_hex(info.stack_pointer);
+    serial_print("\r\n");
 
     if (info.code_segment & 3) == 3 {
         serial_println("User mode GPF. Terminating task.");
@@ -108,7 +113,10 @@ pub extern "x86-interrupt" fn general_protection_fault(info: &mut StackFrame, er
             loop { core::arch::asm!("hlt"); }
         }
     } else {
-        loop {}
+        unsafe {
+            core::arch::asm!("cli");
+            loop { core::arch::asm!("hlt"); }
+        }
     }
 }
 
@@ -141,7 +149,10 @@ pub extern "x86-interrupt" fn page_fault(info: &mut StackFrame, error_code: u64)
             loop { core::arch::asm!("hlt"); }
         }
     } else {
-        loop {}
+        unsafe {
+            core::arch::asm!("cli");
+            loop { core::arch::asm!("hlt"); }
+        }
     }
 }
 
@@ -192,7 +203,7 @@ pub extern "x86-interrupt" fn keyboard_handler(_info: &mut StackFrame) {
                         repeat: 1,
                     });
 
-                    (*(&raw mut GLOBAL_EVENT_QUEUE)).add_event(event);
+                    GLOBAL_EVENT_QUEUE.int_lock().add_event(event);
                 }
             }
         }
@@ -220,8 +231,13 @@ pub extern "x86-interrupt" fn mouse_handler(_info: &mut StackFrame) {
             return;
         }
 
-        MOUSE_PACKET[MOUSE_IDX] = data;
-        MOUSE_IDX += 1;
+        if MOUSE_IDX < (*(&raw const MOUSE_PACKET)).len() {
+             MOUSE_PACKET[MOUSE_IDX] = data;
+             MOUSE_IDX += 1;
+        } else {
+             // Buffer overflow prevention: Reset if we somehow got here
+             MOUSE_IDX = 0;
+        }
 
         if MOUSE_IDX >= MOUSE_PACKET_SIZE {
             if MOUSE_PACKET_SIZE == 3 {
