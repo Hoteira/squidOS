@@ -11,7 +11,7 @@ pub struct DisplayServer {
 
     pub framebuffer: u64,
     pub double_buffer: u64,
-    
+
     pub buffer1_phys: u64,
     pub buffer2_phys: u64,
     pub active_resource_id: u32,
@@ -39,7 +39,7 @@ impl DisplayServer {
         unsafe {
             virtio::init();
             if virtio::queue::VIRT_QUEUES[0].is_some() {
-                
+
                 if let Some((w, h)) = virtio::get_display_info() {
                     self.width = w as u64;
                     self.height = h as u64;
@@ -64,11 +64,11 @@ impl DisplayServer {
 
                 self.buffer1_phys = b1;
                 self.buffer2_phys = b2;
-                
+
                 // Active (Front) is Buffer 1
                 self.framebuffer = b1;
                 self.active_resource_id = 1;
-                
+
                 // Double (Back) is Buffer 2
                 self.double_buffer = b2;
 
@@ -88,7 +88,7 @@ impl DisplayServer {
                     for i in 0..CURSOR_BUFFER.len() {
                         *cursor_ptr.add(i) = CURSOR_BUFFER[i];
                     }
-                    
+
                     // Temporarily disabled hardware cursor setup
                     // virtio::cursor::setup_cursor(cursor_phys, CURSOR_WIDTH as u32, CURSOR_HEIGHT as u32, self.width as u32 / 2, self.height as u32 / 2);
                     debugln!("DisplayServer: Hardware cursor is DISABLED by request.");
@@ -143,7 +143,7 @@ impl DisplayServer {
 
                 // 3. Update state
                 self.active_resource_id = next_resource;
-                
+
                 // Swap pointers:
                 // framebuffer becomes the NEW active buffer (what was back)
                 // double_buffer becomes the NEW back buffer (what was front, to be drawn over)
@@ -197,7 +197,7 @@ impl DisplayServer {
                 // SRC: pitch * (original_y + src_off_y + row) + (original_x + src_off_x) * 4
                 // But wait, source is double_buffer (screen sized).
                 // So source coords are SAME as dest coords for copy_to_fb (restoring background).
-                
+
                 let offset = ((dst_y as usize + row) * pitch + dst_x as usize * bytes_per_pixel) as usize;
 
                 core::ptr::copy_nonoverlapping(
@@ -209,7 +209,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_db(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32) {
+    pub fn copy_to_db(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>) {
         let dst_pitch = self.pitch as usize / 4; // Pitch in u32
         let src_pitch = width as usize;          // Pitch in u32
         let screen_w = self.width as i32;
@@ -226,7 +226,7 @@ impl DisplayServer {
 
         let copy_width = (end_x - dst_x) as usize;
         let copy_height = (end_y - dst_y) as usize;
-        
+
         let src_off_x = (dst_x - x) as usize;
         let src_off_y = (dst_y - y) as usize;
 
@@ -239,6 +239,19 @@ impl DisplayServer {
                 let dst_row_ptr = dst_base.add((dst_y as usize + row) * dst_pitch + (dst_x as usize));
 
                 for col in 0..copy_width {
+                    // Border check
+                    let in_window_x = src_off_x + col;
+                    let in_window_y = src_off_y + row;
+                    let is_border = in_window_x == 0 || in_window_x == (width as usize - 1) ||
+                                    in_window_y == 0 || in_window_y == (height as usize - 1);
+
+                    if is_border {
+                        if let Some(color) = border_color {
+                            *dst_row_ptr.add(col) = color;
+                            continue;
+                        }
+                    }
+
                     let src_pixel = *src_row_ptr.add(col);
                     let alpha = (src_pixel >> 24) & 0xFF;
 
@@ -248,7 +261,7 @@ impl DisplayServer {
                         continue;
                     } else {
                         let dst_pixel = *dst_row_ptr.add(col);
-                        
+
                         let inv_alpha = 255 - alpha;
 
                         let src_r = (src_pixel >> 16) & 0xFF;
@@ -270,7 +283,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_db_clipped(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32) {
+    pub fn copy_to_db_clipped(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32, border_color: Option<u32>) {
         let dst_pitch = self.pitch as usize / 4; // Pitch in u32
         let src_pitch = width as usize;          // Pitch in u32
         let screen_w = self.width as i32;
@@ -316,8 +329,8 @@ impl DisplayServer {
         let dst_len = (self.pitch as usize / 4) * (self.height as usize);
         let dst_end_offset = (intersect_y as usize + copy_height - 1) * dst_pitch + (intersect_x as usize + copy_width);
         if dst_end_offset > dst_len {
-             // crate::debugln!("Display: Clipping Dest OOB! Req: {}, Len: {}", dst_end_offset, dst_len);
-             return;
+            // crate::debugln!("Display: Clipping Dest OOB! Req: {}, Len: {}", dst_end_offset, dst_len);
+            return;
         }
 
         unsafe {
@@ -327,12 +340,25 @@ impl DisplayServer {
             for row in 0..copy_height {
                 // Source pointer: window_buffer[ (src_y + row) * width + src_x ]
                 let src_row_ptr = src_base.add((src_off_y + row) * src_pitch + src_off_x);
-                
+
                 // Dest pointer:   db[ (dst_y + row) * pitch + dst_x ]
                 // intersect_y is absolute screen Y
                 let dst_row_ptr = dst_base.add((intersect_y as usize + row) * dst_pitch + (intersect_x as usize));
 
                 for col in 0..copy_width {
+                    // Border check
+                    let in_window_x = src_off_x + col;
+                    let in_window_y = src_off_y + row;
+                    let is_border = in_window_x == 0 || in_window_x == (width as usize - 1) ||
+                                    in_window_y == 0 || in_window_y == (height as usize - 1);
+
+                    if is_border {
+                        if let Some(color) = border_color {
+                            *dst_row_ptr.add(col) = color;
+                            continue;
+                        }
+                    }
+
                     let src_pixel = *src_row_ptr.add(col);
                     let alpha = (src_pixel >> 24) & 0xFF;
 
@@ -342,7 +368,7 @@ impl DisplayServer {
                         continue;
                     } else {
                         let dst_pixel = *dst_row_ptr.add(col);
-                        
+
                         let inv_alpha = 255 - alpha;
 
                         let src_r = (src_pixel >> 16) & 0xFF;
@@ -364,7 +390,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_fb_a(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32) {
+    pub fn copy_to_fb_a(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>) {
         let dst_pitch = self.pitch as usize / 4;
         let src_pitch = width as usize;
         let screen_w = self.width as i32;
@@ -381,19 +407,32 @@ impl DisplayServer {
 
         let copy_width = (end_x - dst_x) as usize;
         let copy_height = (end_y - dst_y) as usize;
-        
+
         let src_off_x = (dst_x - x) as usize;
         let src_off_y = (dst_y - y) as usize;
 
         unsafe {
             let src_base = buffer as *const u32;
-            let dst_base = self.framebuffer as *mut u32; 
+            let dst_base = self.framebuffer as *mut u32;
 
             for row in 0..copy_height {
                 let src_row_ptr = src_base.add((src_off_y + row) * src_pitch + src_off_x);
                 let dst_row_ptr = dst_base.add((dst_y as usize + row) * dst_pitch + (dst_x as usize));
 
                 for col in 0..copy_width {
+                    // Border check
+                    let in_window_x = src_off_x + col;
+                    let in_window_y = src_off_y + row;
+                    let is_border = in_window_x == 0 || in_window_x == (width as usize - 1) ||
+                                    in_window_y == 0 || in_window_y == (height as usize - 1);
+
+                    if is_border {
+                        if let Some(color) = border_color {
+                            *dst_row_ptr.add(col) = color;
+                            continue;
+                        }
+                    }
+
                     let src_pixel = *src_row_ptr.add(col);
                     let alpha = (src_pixel >> 24) & 0xFF;
 
@@ -403,7 +442,7 @@ impl DisplayServer {
                         continue;
                     } else {
                         let dst_pixel = *dst_row_ptr.add(col);
-                        
+
                         let inv_alpha = 255 - alpha;
 
                         let src_r = (src_pixel >> 16) & 0xFF;
@@ -447,26 +486,26 @@ impl DisplayServer {
                 // Wait, copy_to_db writes to self.double_buffer.
                 // If double_buffer != framebuffer (active), we are writing to the back buffer.
                 // If we flush the BACK buffer, it won't show up if scanout is on FRONT buffer.
-                
+
                 // FORCE: For dirty rects, we must copy DB -> FB (RAM copy) then Flush FB -> GPU.
                 // Or, simple mode: Just copy DB -> FB and flush.
-                
+
                 let bpp = 4;
                 let pitch = self.pitch as usize;
                 let src = self.double_buffer as *const u8;
                 let dst = self.framebuffer as *mut u8; // Active buffer
                 let fb_len = (self.pitch * self.height) as usize;
-                
+
                 // 1. Sync RAM (DB -> FB) for this rect
                 for row in 0..sh {
                     let offset = (sy + row) as usize * pitch + sx as usize * bpp ;
                     let end_offset = offset + (sw * bpp as u32) as usize;
-                    
+
                     if end_offset <= fb_len {
                         core::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), (sw * bpp as u32) as usize);
                     }
                 }
-                
+
                 // 2. Flush to GPU
                 virtio::flush(sx, sy, sw, sh, self.width as u32, self.active_resource_id);
             } else {
@@ -491,8 +530,8 @@ impl DisplayServer {
         */
 
         let pitch_bytes = self.pitch as usize;
-        let fb_ptr = self.framebuffer as *mut u32; 
-        let db_ptr = self.double_buffer as *const u32; 
+        let fb_ptr = self.framebuffer as *mut u32;
+        let db_ptr = self.double_buffer as *const u32;
         let width = self.width as usize;
         let height = self.height as usize;
         let mx = x as usize;
@@ -515,7 +554,7 @@ impl DisplayServer {
                     if screen_x >= width { break; }
 
                     let cursor_color = CURSOR_BUFFER[cursor_row_start + col];
-                    
+
                     if cursor_color != 0 {
                         *fb_ptr.add(fb_row_start + col) = cursor_color;
                     } else if !dragging_window {

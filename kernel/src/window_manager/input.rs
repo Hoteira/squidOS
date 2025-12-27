@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicU16, Ordering};
 use crate::debugln;
 use crate::drivers::video::virtio;
-use crate::window_manager::display::{DISPLAY_SERVER, VIRTIO_ACTIVE, Color, State}; 
+use crate::window_manager::display::{DISPLAY_SERVER, VIRTIO_ACTIVE, Color, State};
 use super::composer::COMPOSER;
 use super::events::{Event, ResizeEvent, GLOBAL_EVENT_QUEUE};
 use super::window::Items;
@@ -82,12 +82,28 @@ impl Mouse {
             let w = unsafe { (*(&raw mut COMPOSER)).find_window(self.x as usize, self.y as usize) };
             if let Some(ws) = w {
                 let is_super = crate::drivers::periferics::keyboard::is_super_active();
-                
+
+                unsafe {
+                    let old_id = CLICKED_WINDOW_ID;
+                    let new_id = ws.id;
+
+                    // Update Focus
+                    if old_id != new_id {
+                        CLICKED_WINDOW_ID = new_id;
+                        // Redraw old window (revert to purple)
+                        if old_id != 0 {
+                            (*(&raw mut COMPOSER)).update_window_area(old_id);
+                        }
+                        // Redraw new window (set to white)
+                        (*(&raw mut COMPOSER)).update_window_area(new_id);
+                    }
+                }
+
                 // Only drag if Super key is held, regardless of where in the window we click
                 if ws.can_move && is_super {
-                    unsafe { 
+                    unsafe {
                         CLICK_STARTED_IN_TITLEBAR = true; // Variable name is legacy, implies "Drag Started"
-                        CLICKED_WINDOW_ID = ws.id;
+                        // CLICKED_WINDOW_ID is already set above
                     }
                 } else {
                     unsafe { CLICK_STARTED_IN_TITLEBAR = false; }
@@ -202,9 +218,9 @@ impl Mouse {
                 if VIRTIO_ACTIVE {
                     virtio::flush(w.x as u32, w.y as u32, W_WIDTH as u32, W_HEIGHT as u32, (*(&raw mut DISPLAY_SERVER)).width as u32, (*(&raw mut DISPLAY_SERVER)).active_resource_id);
                 }
-                
+
                 (*(&raw mut DISPLAY_SERVER)).draw_mouse(self.x, self.y, false);
-                
+
                 if VIRTIO_ACTIVE {
                     let mx = self.x as u32;
                     let my = self.y as u32;
@@ -212,7 +228,7 @@ impl Mouse {
                     let sh = (*(&raw mut DISPLAY_SERVER)).height as u32;
                     let fw = (32 as u32).min(sw.saturating_sub(mx));
                     let fh = (32 as u32).min(sh.saturating_sub(my));
-                    
+
                     if fw > 0 && fh > 0 {
                         virtio::flush(mx, my, fw, fh, sw, (*(&raw mut DISPLAY_SERVER)).active_resource_id);
                     }
@@ -243,23 +259,23 @@ impl Mouse {
 
             let target_mx = old_x as i32 + x_vec as i32;
             let target_my = old_y as i32 - y_vec as i32;
-            
+
             let screen_w = display_server.width as i32;
             let screen_h = display_server.height as i32;
-            
+
             let mouse_limit_w = screen_w + 50;
             let mouse_limit_h = screen_h + 50;
 
             let clamped_mx = target_mx.max(0).min(mouse_limit_w - 1);
             let clamped_my = target_my.max(0).min(mouse_limit_h - 1);
-            
+
             let mouse_dx = clamped_mx - old_x as i32;
             let mouse_dy = clamped_my - old_y as i32;
 
             let target_win_x = old_win_x as i32 + mouse_dx;
-            let target_win_y = old_win_y as i32 + mouse_dy; 
+            let target_win_y = old_win_y as i32 + mouse_dy;
 
-            let margin = 3; 
+            let margin = 3;
 
             let min_visible_x = -(width as i32) + margin;
             let max_visible_x = screen_w - margin;
@@ -288,7 +304,8 @@ impl Mouse {
 
             display_server.copy_to_fb(old_win_x as i32, old_win_y as i32, width as u32, height as u32);
 
-            display_server.copy_to_fb_a(width as u32, height as u32, buffer, new_x as i32, new_y as i32);
+            // Dragged window is always active -> White border
+            display_server.copy_to_fb_a(width as u32, height as u32, buffer, new_x as i32, new_y as i32, Some(0xFFFFFFFF));
 
             // Ensure Bar/Popups stay on top of dragged window
             for i in 0..composer.windows.len() {
@@ -300,7 +317,8 @@ impl Mouse {
                             w.height as u32,
                             w.buffer,
                             w.x as i32,
-                            w.y as i32
+                            w.y as i32,
+                            None
                         );
                     }
                     _ => {}
@@ -349,31 +367,31 @@ impl Mouse {
         unsafe {
             let display_server = &mut *(&raw mut DISPLAY_SERVER);
             display_server.copy_to_fb(old_x as i32, old_y as i32, 32, 32);
-            
+
             display_server.draw_mouse(self.x, self.y, false);
 
             if VIRTIO_ACTIVE {
-                 let u_old_x = old_x as u32;
-                 let u_old_y = old_y as u32;
-                 let u_new_x = self.x as u32;
-                 let u_new_y = self.y as u32;
-                 
-                 let min_x = u_old_x.min(u_new_x);
-                 let min_y = u_old_y.min(u_new_y);
-                 let max_x = (u_old_x + 32).max(u_new_x + 32);
-                 let max_y = (u_old_y + 32).max(u_new_y + 32);
-                 
-                 let screen_w = display_server.width as u32;
-                 let screen_h = display_server.height as u32;
-                 
-                 let flush_x = min_x.min(screen_w);
-                 let flush_y = min_y.min(screen_h);
-                 let flush_w = (max_x.min(screen_w)).saturating_sub(flush_x);
-                 let flush_h = (max_y.min(screen_h)).saturating_sub(flush_y);
-                 
-                 if flush_w > 0 && flush_h > 0 {
+                let u_old_x = old_x as u32;
+                let u_old_y = old_y as u32;
+                let u_new_x = self.x as u32;
+                let u_new_y = self.y as u32;
+
+                let min_x = u_old_x.min(u_new_x);
+                let min_y = u_old_y.min(u_new_y);
+                let max_x = (u_old_x + 32).max(u_new_x + 32);
+                let max_y = (u_old_y + 32).max(u_new_y + 32);
+
+                let screen_w = display_server.width as u32;
+                let screen_h = display_server.height as u32;
+
+                let flush_x = min_x.min(screen_w);
+                let flush_y = min_y.min(screen_h);
+                let flush_w = (max_x.min(screen_w)).saturating_sub(flush_x);
+                let flush_h = (max_y.min(screen_h)).saturating_sub(flush_y);
+
+                if flush_w > 0 && flush_h > 0 {
                     virtio::flush(flush_x, flush_y, flush_w, flush_h, screen_w, display_server.active_resource_id);
-                 }
+                }
             }
 
             if self.left {
@@ -397,9 +415,9 @@ impl Mouse {
                         buttons: [self.left, self.right, self.center],
                         scroll: scroll_val,
                     });
-                    
+
                     GLOBAL_EVENT_QUEUE.int_lock().add_event(event);
-                    
+
                     if self.left {
                         crate::debugln!("Input: Dispatching Mouse Event to {}", w.id);
                         CLICKED_WINDOW_ID = w.id;
@@ -448,7 +466,7 @@ impl Mouse {
     fn clamp_mx(&self, n: i16) -> u16 {
         let mx_0 = self.x as i16;
         let sx = unsafe { (*(&raw mut DISPLAY_SERVER)).width } as u16;
-        
+
         let limit = unsafe {
             if (*(&raw mut DRAGGING_WINDOW)).load(Ordering::Relaxed) != 0 {
                 sx + 50
@@ -469,7 +487,7 @@ impl Mouse {
     fn clamp_my(&self, n: i16) -> u16 {
         let my_0 = self.y as i16;
         let sy = unsafe { (*(&raw mut DISPLAY_SERVER)).height } as u16;
-        
+
         let limit = unsafe {
             if (*(&raw mut DRAGGING_WINDOW)).load(Ordering::Relaxed) != 0 {
                 sy + 50

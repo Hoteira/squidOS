@@ -1,6 +1,7 @@
 use super::window::{Window, Items, NULL_WINDOW};
 use crate::window_manager::display::DISPLAY_SERVER;
 use crate::window_manager::events::{Event, ResizeEvent, GLOBAL_EVENT_QUEUE};
+use crate::window_manager::input::CLICKED_WINDOW_ID;
 use crate::debugln;
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,18 @@ impl Composer {
     pub fn copy_window(&mut self, id: usize) {
         for i in 0..self.windows.len() {
             if id == self.windows[i].id {
+                let border_color = if self.windows[i].w_type == Items::Window {
+                    unsafe {
+                        if self.windows[i].id == CLICKED_WINDOW_ID {
+                            Some(0xFFFFFFFF)
+                        } else {
+                            Some(0xFF9070FF)
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 match self.windows[i].w_type {
                     Items::Null => {}
                     _ => unsafe {
@@ -25,6 +38,7 @@ impl Composer {
                             self.windows[i].buffer,
                             self.windows[i].x as i32,
                             self.windows[i].y as i32,
+                            border_color,
                         )
                     },
                 }
@@ -35,6 +49,18 @@ impl Composer {
     pub fn copy_window_fb(&mut self, id: usize) {
         for i in 0..self.windows.len() {
             if id == self.windows[i].id {
+                let border_color = if self.windows[i].w_type == Items::Window {
+                    unsafe {
+                        if self.windows[i].id == CLICKED_WINDOW_ID {
+                            Some(0xFFFFFFFF)
+                        } else {
+                            Some(0xFF9070FF)
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 match self.windows[i].w_type {
                     Items::Null => {}
                     _ => unsafe {
@@ -44,6 +70,7 @@ impl Composer {
                             self.windows[i].buffer,
                             self.windows[i].x as i32,
                             self.windows[i].y as i32,
+                            border_color,
                         )
                     },
                 }
@@ -130,9 +157,16 @@ impl Composer {
             }
         }
 
-        debugln!("Tiling: Count={}, Work={}x{} @ {},{}", tiled_count, work_w, work_h, work_x, work_y);
+        // debugln!("Tiling: Count={}, Work={}x{} @ {},{}", tiled_count, work_w, work_h, work_x, work_y);
 
         let count = tiled_count;
+
+        // Dirty rect tracking
+        let mut min_x: i32 = 100000;
+        let mut min_y: i32 = 100000;
+        let mut max_x: i32 = -100000;
+        let mut max_y: i32 = -100000;
+        let mut any_change = false;
 
         for i in 0..count {
             let wid = tiled_windows[i];
@@ -178,7 +212,7 @@ impl Composer {
                 }
             };
 
-            debugln!("  Win {}: ID={} -> {}x{} @ {},{}", i, wid, tw, th, tx, ty);
+            // debugln!("  Win {}: ID={} -> {}x{} @ {},{}", i, wid, tw, th, tx, ty);
 
             // Apply to window
             let mut win_idx = None;
@@ -190,37 +224,69 @@ impl Composer {
             }
 
             if let Some(idx) = win_idx {
-                debugln!("    Applying to idx {}", idx);
+                // debugln!("    Applying to idx {}", idx);
                 let current_w = self.windows[idx].width;
                 let current_h = self.windows[idx].height;
+                let current_x = self.windows[idx].x;
+                let current_y = self.windows[idx].y;
 
-                // Update Position AND Size
-                self.windows[idx].x = tx as isize;
-                self.windows[idx].y = ty as isize;
-                self.windows[idx].width = tw;
-                self.windows[idx].height = th;
-                self.windows[idx].can_move = false;
-                self.windows[idx].can_resize = false;
+                if current_x != tx as isize || current_y != ty as isize || current_w != tw || current_h != th {
+                    any_change = true;
 
-                // Send Event if size changed
-                if current_w != tw || current_h != th {
-                    debugln!("    Size changed ({}x{} -> {}x{}), sending event...", current_w, current_h, tw, th);
-                    let mut queue = GLOBAL_EVENT_QUEUE.lock();
-                    queue.add_event(Event::Resize(ResizeEvent {
-                        wid: wid as u32,
-                        width: tw,
-                        height: th,
-                    }));
-                    drop(queue);
-                    debugln!("    Event sent.");
+                    // Helper to expand dirty rect
+                    let mut add_rect = |rx: i32, ry: i32, rw: i32, rh: i32| {
+                        if min_x > rx { min_x = rx; }
+                        if min_y > ry { min_y = ry; }
+                        if max_x < rx + rw { max_x = rx + rw; }
+                        if max_y < ry + rh { max_y = ry + rh; }
+                    };
+
+                    // 1. Old area
+                    add_rect(current_x as i32, current_y as i32, current_w as i32, current_h as i32);
+
+                    // 2. New area (target)
+                    add_rect(tx as i32, ty as i32, tw as i32, th as i32);
+
+                    // 3. New area (drawn with old size - effectively where we will draw momentarily)
+                    add_rect(tx as i32, ty as i32, current_w as i32, current_h as i32);
+
+                    // Update Position ONLY
+                    self.windows[idx].x = tx as isize;
+                    self.windows[idx].y = ty as isize;
+                    // Note: We DO NOT update width/height here to avoid reading OOB on the old buffer.
+                    // We wait for the app to resize and call resize_window.
+                    self.windows[idx].can_move = false;
+                    self.windows[idx].can_resize = false;
+
+                    // Send Event if size changed
+                    if current_w != tw || current_h != th {
+                        // debugln!("    Size changed ({}x{} -> {}x{}), sending event...", current_w, current_h, tw, th);
+                        let mut queue = GLOBAL_EVENT_QUEUE.lock();
+                        queue.add_event(Event::Resize(ResizeEvent {
+                            wid: wid as u32,
+                            width: tw,
+                            height: th,
+                        }));
+                        drop(queue);
+                        // debugln!("    Event sent.");
+                    }
                 }
             } else {
-                debugln!("    Window ID {} not found!", wid);
+                // debugln!("    Window ID {} not found!", wid);
             }
         }
 
-        // Batch Redraw: Update the entire tiling workspace once
-        self.update_window_area_rect(work_x as i32, work_y as i32, work_w as u32, work_h as u32);
+        if any_change {
+            // Clamp to screen
+            let sx = min_x.max(0);
+            let sy = min_y.max(0);
+            let ex = max_x.min(screen_w as i32);
+            let ey = max_y.min(screen_h as i32);
+
+            if ex > sx && ey > sy {
+                self.update_window_area_rect(sx, sy, (ex - sx) as u32, (ey - sy) as u32);
+            }
+        }
     }
 
     pub fn check_id(&self, _rng_seed: u64) -> usize {
@@ -286,32 +352,41 @@ impl Composer {
                 // Update buffer pointer (app allocated new buffer)
                 self.windows[i].buffer = w.buffer;
 
-                // For non-tiled windows (Bar, Popup, etc), accept the new size
-                if self.windows[i].w_type != Items::Window {
-                    let old_w = self.windows[i].width;
-                    let old_h = self.windows[i].height;
+                // Save old rect for dirty calculation
+                let old_x = self.windows[i].x;
+                let old_y = self.windows[i].y;
+                let old_w = self.windows[i].width;
+                let old_h = self.windows[i].height;
 
-                    self.windows[i].width = w.width;
-                    self.windows[i].height = w.height;
+                // Always update properties provided by app (it's the authority on its buffer)
+                self.windows[i].width = w.width;
+                self.windows[i].height = w.height;
+
+                // Only update x/y if not tiled (Tiled windows shouldn't move themselves)
+                if self.windows[i].w_type != Items::Window {
                     self.windows[i].x = w.x;
                     self.windows[i].y = w.y;
                     self.windows[i].can_move = w.can_move;
+                }
 
-                    // Redraw the updated area
-                    let current_x = self.windows[i].x;
-                    let current_y = self.windows[i].y;
-                    let u_max_x = (current_x + old_w as isize).max(current_x + w.width as isize);
-                    let u_max_y = (current_y + old_h as isize).max(current_y + w.height as isize);
+                // Calculate dirty rect (Old Area U New Area)
+                let current_x = self.windows[i].x;
+                let current_y = self.windows[i].y;
 
-                    let dirty_w = (u_max_x - current_x).max(0) as u32;
-                    let dirty_h = (u_max_y - current_y).max(0) as u32;
+                let min_x = old_x.min(current_x);
+                let min_y = old_y.min(current_y);
+                let max_x = (old_x + old_w as isize).max(current_x + w.width as isize);
+                let max_y = (old_y + old_h as isize).max(current_y + w.height as isize);
 
-                    if dirty_w > 0 && dirty_h > 0 {
-                        self.update_window_area_rect(current_x as i32, current_y as i32, dirty_w, dirty_h);
-                    }
-                } else {
-                    // For tiled windows, trigger a full retile
-                    debugln!("resize_window: Tiled window {}, retriggering tiling", w.id);
+                let dirty_w = (max_x - min_x).max(0) as u32;
+                let dirty_h = (max_y - min_y).max(0) as u32;
+
+                if dirty_w > 0 && dirty_h > 0 {
+                    self.update_window_area_rect(min_x as i32, min_y as i32, dirty_w, dirty_h);
+                }
+
+                if self.windows[i].w_type == Items::Window {
+                    // debugln!("resize_window: Tiled window {}, retriggering tiling", w.id);
                     self.update_tiling();
                 }
 
@@ -350,13 +425,24 @@ impl Composer {
                     Items::Null => {}
                     _ => {
                         let w = &self.windows[i];
+                        let border_color = if w.w_type == Items::Window {
+                            if w.id == CLICKED_WINDOW_ID {
+                                Some(0xFFFFFFFF)
+                            } else {
+                                Some(0xFF9070FF)
+                            }
+                        } else {
+                            None
+                        };
+
                         display_server.copy_to_db_clipped(
                             w.width as u32,
                             w.height as u32,
                             w.buffer,
                             w.x as i32,
                             w.y as i32,
-                            dirty_x, dirty_y, dirty_w, dirty_h
+                            dirty_x, dirty_y, dirty_w, dirty_h,
+                            border_color
                         );
                     }
                 }
@@ -382,12 +468,23 @@ impl Composer {
                     match self.windows[i].w_type {
                         Items::Null => {}
                         _ => {
+                            let border_color = if self.windows[i].w_type == Items::Window {
+                                if self.windows[i].id == CLICKED_WINDOW_ID {
+                                    Some(0xFFFFFFFF)
+                                } else {
+                                    Some(0xFF9070FF)
+                                }
+                            } else {
+                                None
+                            };
+
                             display_server.copy_to_db(
                                 self.windows[i].width as u32,
                                 self.windows[i].height as u32,
                                 self.windows[i].buffer,
                                 self.windows[i].x as i32,
                                 self.windows[i].y as i32,
+                                border_color,
                             );
                         }
                     }
@@ -440,13 +537,24 @@ impl Composer {
                     Items::Null => {}
                     _ => {
                         let w = &self.windows[i];
+                        let border_color = if w.w_type == Items::Window {
+                            if w.id == CLICKED_WINDOW_ID {
+                                Some(0xFFFFFFFF)
+                            } else {
+                                Some(0xFF9070FF)
+                            }
+                        } else {
+                            None
+                        };
+
                         display_server.copy_to_db_clipped(
                             w.width as u32,
                             w.height as u32,
                             w.buffer,
                             w.x as i32,
                             w.y as i32,
-                            dirty_x, dirty_y, dirty_w, dirty_h
+                            dirty_x, dirty_y, dirty_w, dirty_h,
+                            border_color
                         );
                     }
                 }
@@ -480,12 +588,23 @@ impl Composer {
                 match self.windows[j].w_type {
                     Items::Null => {}
                     _ => {
+                        let border_color = if self.windows[j].w_type == Items::Window {
+                            if self.windows[j].id == CLICKED_WINDOW_ID {
+                                Some(0xFFFFFFFF)
+                            } else {
+                                Some(0xFF9070FF)
+                            }
+                        } else {
+                            None
+                        };
+
                         (*(&raw mut DISPLAY_SERVER)).copy_to_db(
                             self.windows[j].width as u32,
                             self.windows[j].height as u32,
                             self.windows[j].buffer,
                             self.windows[j].x as i32,
                             self.windows[j].y as i32,
+                            border_color,
                         );
                     }
                 }

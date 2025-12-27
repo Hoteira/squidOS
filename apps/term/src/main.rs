@@ -175,10 +175,7 @@ pub extern "C" fn _start() -> ! {
     let mut root = Widget::frame(1)
         .width(Size::Relative(100))
         .height(Size::Relative(100))
-        .background_color(Color::rgba(0, 0, 0, 164))
-        .set_border_color(Color::rgb(0, 34, 255))
-        .set_border_size(Size::Absolute(1))
-        .set_border_radius(Size::Absolute(5));
+        .background_color(Color::rgba(0, 0, 0, 164));
     
     let term_display = Widget::label(2, "")
         .width(Size::Relative(92))
