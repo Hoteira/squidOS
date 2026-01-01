@@ -71,7 +71,7 @@ pub fn print(s: &str) {
 
 pub fn sleep(ms: u64) {
 
-    if ms > 10 {
+    if ms > 10000 {
         unsafe {
             syscall(76, ms, 0, 0);
         }
@@ -190,4 +190,38 @@ pub fn get_time() -> (u8, u8, u8) {
     let m = ((res >> 8) & 0xFF) as u8;
     let s = (res & 0xFF) as u8;
     (h, m, s)
+}
+
+pub fn get_system_ticks() -> u64 {
+    unsafe { syscall(55, 0, 0, 0) }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct ProcessInfo {
+    pub pid: u64,
+    pub state: u64, 
+    pub name: [u8; 32],
+}
+
+pub fn get_process_list() -> alloc::vec::Vec<ProcessInfo> {
+    let max_count = 128;
+    let mut processes = alloc::vec::Vec::with_capacity(max_count);
+    
+    // Initialize with default values to set length safely (ProcessInfo is Copy)
+    processes.resize(max_count, ProcessInfo { pid: 0, state: 0, name: [0; 32] });
+    
+    let count = unsafe {
+        syscall(77, processes.as_mut_ptr() as u64, max_count as u64, 0) as usize
+    };
+    
+    // Truncate to actual count returned by kernel
+    if count <= max_count {
+        processes.truncate(count);
+    }
+    processes
+}
+
+pub fn get_process_memory(pid: u64) -> usize {
+    unsafe { syscall(79, pid, 0, 0) as usize }
 }

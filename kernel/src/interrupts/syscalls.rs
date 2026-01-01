@@ -29,6 +29,8 @@ pub const SYS_CREATE_DIR: u64 = 72;
 pub const SYS_REMOVE: u64 = 73;
 pub const SYS_RENAME: u64 = 74;
 pub const SYS_SLEEP: u64 = 76;
+pub const SYS_GET_PROCESS_LIST: u64 = 77;
+pub const SYS_GET_PROCESS_MEM: u64 = 79;
 
 pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<u64, String> {
     
@@ -45,6 +47,13 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
     };
 
     let actual_path = if path_parts.len() > 1 { path_parts[1..].join("/") } else { String::from("") };
+    
+    let process_name_str = if let Some(last_slash) = actual_path.rfind('/') {
+        &actual_path[last_slash+1..]
+    } else {
+        &actual_path
+    };
+    let process_name_bytes = process_name_str.as_bytes();
 
     
     let mut file_buf = Vec::new();
@@ -100,7 +109,7 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
             
             let init_res = {
                 let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
-                tm.init_user_task(pid_idx, entry_point, pml4_phys, None, Some(new_fd_table))
+                tm.init_user_task(pid_idx, entry_point, pml4_phys, None, Some(new_fd_table), process_name_bytes)
             };
             
             match init_res {
@@ -1071,6 +1080,63 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
                 task.wake_ticks = unsafe { crate::interrupts::task::SYSTEM_TICKS } + duration;
                 task.state = crate::interrupts::task::TaskState::Sleeping;
             }
+        }
+
+        77 => { 
+            let buf_ptr = context.rdi as *mut u8;
+            let max_count = context.rsi as usize;
+            
+            if buf_ptr.is_null() || max_count == 0 {
+                context.rax = 0;
+                return;
+            }
+
+            let mut count = 0;
+            let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            
+            
+            
+            
+            let struct_size = 48; 
+
+            for (i, task) in tm.tasks.iter().enumerate() {
+                if task.state != crate::interrupts::task::TaskState::Null {
+                    if count >= max_count {
+                        break;
+                    }
+                    
+                    let offset = count * struct_size;
+                    unsafe {
+                        let ptr = buf_ptr.add(offset);
+                        *(ptr as *mut u64) = i as u64; 
+                        *(ptr.add(8) as *mut u64) = match task.state {
+                             crate::interrupts::task::TaskState::Null => 0,
+                             crate::interrupts::task::TaskState::Reserved => 1,
+                             crate::interrupts::task::TaskState::Ready => 2,
+                             crate::interrupts::task::TaskState::Zombie => 3,
+                             crate::interrupts::task::TaskState::Sleeping => 4,
+                        };
+                        
+                        
+                        let name_ptr = ptr.add(16);
+                        core::ptr::copy_nonoverlapping(task.name.as_ptr(), name_ptr, 32);
+                    }
+                    count += 1;
+                }
+            }
+            context.rax = count as u64;
+        }
+
+        78 => {
+            let pid = context.rdi as u64;
+            let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
+            tm.kill_process(pid);
+            context.rax = 0;
+        }
+
+        79 => {
+            let pid = context.rdi as u64;
+            context.rax = crate::memory::pmm::get_memory_usage_by_pid(pid) as u64;
         }
 
         _ => {

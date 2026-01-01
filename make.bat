@@ -23,6 +23,12 @@ copy "target\bits64pie\release\term" "tree\sys\bin\term.elf"
 cargo build --package=shell --target=bits64pie.json --release
 copy "target\bits64pie\release\shell" "tree\sys\bin\shell.elf"
 
+cargo build --package=sysmon --target=bits64pie.json --release
+copy "target\bits64pie\release\sysmon" "tree\sys\bin\sysmon.elf"
+
+cargo build --package=fps_test --target=bits64pie.json --release
+copy "target\bits64pie\release\fps_test" "tree\sys\bin\fps_test.elf"
+
 cargo build --package=tmap --target=bits64pie.json --release
 copy "target\bits64pie\release\tmap" "tree\sys\bin\tmap.elf"
 

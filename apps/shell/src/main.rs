@@ -311,11 +311,17 @@ fn execute_builtin(cmd: &str, args: &[String], cwd: &mut String, in_fd: usize, o
     if cmd == "help" {
         std::os::file_write(out_fd, b"Available commands: help, clear, ls, cd, pwd, touch, mkdir, rm, mv, cp, cat, sleep, osfetch\n");
     } else if cmd == "osfetch" {
-        let purple = "\x1B[38;2;144;112;255m";
         let white = "\x1B[97m";
         let blue = "\x1B[94m"; 
         let gray = "\x1B[90m";
         let reset = "\x1B[0m";
+
+        let p_pink = "\x1B[38;2;255;182;193m";
+        let p_green = "\x1B[38;2;152;251;152m";
+        let p_blue = "\x1B[38;2;173;216;230m";
+        let p_yellow = "\x1B[38;2;255;255;186m";
+        let p_purple = "\x1B[38;2;221;160;221m";
+        let p_cyan = "\x1B[38;2;175;238;238m";
 
         let ascii = [
             "              @@@             ",
@@ -336,18 +342,23 @@ fn execute_builtin(cmd: &str, args: &[String], cwd: &mut String, in_fd: usize, o
 
         let screen_w = std::graphics::get_screen_width();
         let screen_h = std::graphics::get_screen_height();
-        let (h, m, s) = std::os::get_time();
+        
+        let ticks = std::os::get_system_ticks();
+        let total_seconds = ticks / 1000;
+        let h = total_seconds / 3600;
+        let m = (total_seconds % 3600) / 60;
+        let s = total_seconds % 60;
         
         let info = [
-            format!("{}Guest{}@{}KrakeOS{}", blue, white, blue, reset),
+            format!("{}guest{}@{}krakeos{}", p_pink, white, p_blue, reset),
             format!("{}-----------------{}", gray, reset),
-            format!("{} \u{F306} OS: {}KrakeOS{}", purple, white, reset),
-            format!("{} \u{E712} Kernel: {}KrakeOS Kernel 0.1.0{}", purple, white, reset),
-            format!("{} \u{F017} Uptime: {}{}:{}:{:02}{}", purple, white, h, m, s, reset),
-            format!("{} \u{F26C} Resolution: {}{}x{}{}", purple, white, screen_w, screen_h, reset),
-            format!("{} \u{E795} Shell: {}shell{}", purple, white, reset),
-            format!("{} \u{F2DB} PGU: {}virtIO{}", purple, white, reset),
-            format!("{} \u{F031} Font: {}Caskaydia Nerd Font{}", purple, white, reset),
+            format!("{} \u{E8F0} OS: {}KrakeOS{}", p_cyan, white, reset),
+            format!("{} \u{E8F1} Kernel: {}KrakeOS Kernel 0.1.0{}", p_green, white, reset),
+            format!("{} \u{F017} Uptime: {}{}:{}:{:02}{}", p_yellow, white, h, m, s, reset),
+            format!("{} \u{F26C} Resolution: {}{}x{}{}", p_purple, white, screen_w, screen_h, reset),
+            format!("{} \u{E795} Shell: {}shell{}", p_pink, white, reset),
+            format!("{} \u{F2DB} PGU: {}virtIO{}", p_cyan, white, reset),
+            format!("{} \u{F031} Font: {}Caskaydia Nerd Font{}", p_green, white, reset),
             String::from(""),
             String::from(""),
             String::from(""),
@@ -375,7 +386,7 @@ fn execute_builtin(cmd: &str, args: &[String], cwd: &mut String, in_fd: usize, o
                 a_string.push(' ');
             }
             
-            let msg = format!("{}{}{}  {}\n", purple, a_string, reset, i_line);
+            let msg = format!("{}{}{}  {}\n", blue, a_string, reset, i_line);
             std::os::file_write(out_fd, msg.as_bytes());
         }
         std::os::file_write(out_fd, b"\n");

@@ -98,6 +98,18 @@ pub fn draw_square_alpha(
     let r_sq = r * r;
     let r_ceil = ceil_f32(r) as usize;
 
+    // FAST PATH: Solid opaque rectangle with no rounding and no border
+    if r < 0.1 && border_size == 0 && is_bg_opaque {
+        for row in y..end_y {
+            let start = row * buffer_width + x;
+            let end = start + width;
+            if end <= buffer.len() {
+                buffer[start..end].fill(bg_u32);
+            }
+        }
+        return;
+    }
+
     let inner_x_start = x + r_ceil;
     let inner_x_end = if x + width > r_ceil { x + width - r_ceil } else { x };
     let inner_y_start = y + r_ceil;

@@ -502,6 +502,8 @@ pub unsafe extern "C" fn krake_get_event(wid: usize, out_event: *mut u32) -> c_i
                 let pressed = (flags & 0xFF) as u32;
                 let repeat = ((flags >> 8) & 0xFFFF) as u32;
                 
+                
+                
                 *out_event.add(1) = key;     
                 *out_event.add(2) = repeat;  
                 *out_event.add(3) = pressed; 
@@ -533,17 +535,23 @@ static mut DOOM_WINDOW_TRANSPARENT: bool = true;
 static mut DOOM_WINDOW_TREAT_AS_TRANSPARENT: bool = true;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn krake_window_create(width: usize, height: usize, transparent: bool, treat_as_transparent: bool) -> usize {
+pub unsafe extern "C" fn krake_window_create(width: usize, height: usize, _transparent: bool, _treat_as_transparent: bool) -> usize {
     let buffer_size = width * height * 4;
     let buffer = malloc(buffer_size) as usize;
     DOOM_WINDOW_BUFFER = buffer;
     DOOM_WINDOW_WIDTH = width;
     DOOM_WINDOW_HEIGHT = height;
-    DOOM_WINDOW_TRANSPARENT = transparent;
-    DOOM_WINDOW_TREAT_AS_TRANSPARENT = treat_as_transparent;
+    
+    // FORCE OPAQUE for performance
+    DOOM_WINDOW_TRANSPARENT = false;
+    DOOM_WINDOW_TREAT_AS_TRANSPARENT = false;
+    
     let w = RawWindow {
         id: 0, buffer, pid: 0, x: 100, y: 100, z: 0, width, height,
-        can_move: true, can_resize: false, transparent, treat_as_transparent, min_width: 0, min_height: 0,
+        can_move: true, can_resize: false, 
+        transparent: false, 
+        treat_as_transparent: false, 
+        min_width: 0, min_height: 0,
         event_handler: 1, w_type: 3,
     };
     krake_syscall(22, &w as *const _ as u64, 0, 0, 0) as usize

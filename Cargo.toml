@@ -2,7 +2,8 @@
 members = [
     "apps/term",
     "apps/shell",
-    "apps/term",
+    "apps/sysmon",
+    "apps/fps_test",
     "apps/tmap",
     "apps/cat",
     "apps/taskbar",

@@ -383,3 +383,22 @@ pub fn get_used_memory() -> usize {
 pub fn get_total_memory() -> usize {
     unsafe { (*(&raw mut PMM)).total_ram as usize }
 }
+
+pub fn get_memory_usage_by_pid(pid: u64) -> usize {
+    unsafe {
+        let pmm_ptr = &raw mut PMM;
+        let mut total_pages = 0;
+        
+        for i in 0..MAX_ALLOCS {
+            if (*pmm_ptr).allocations[i].used {
+                if (*pmm_ptr).allocations[i].pid == pid {
+                    total_pages += (*pmm_ptr).allocations[i].count;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        total_pages * PAGE_SIZE as usize
+    }
+}

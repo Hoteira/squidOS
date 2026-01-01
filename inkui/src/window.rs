@@ -194,6 +194,22 @@ impl Window {
         self.update();
     }
 
+    pub fn poll_events(&mut self) -> Vec<Event> {
+        let mut events: [Event; 64] = [Event::None; 64];
+        unsafe {
+            syscall(52, self.id as u64, events.as_mut_ptr() as u64, 64);
+        }
+        
+        let mut vec = Vec::new();
+        for e in events {
+            if e == Event::None {
+                break;
+            }
+            vec.push(e);
+        }
+        vec
+    }
+
     pub fn focus_next(&mut self) {
         let mut ids = Vec::new();
         for child in &self.children {

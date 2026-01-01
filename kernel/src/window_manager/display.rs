@@ -750,6 +750,44 @@ impl DisplayServer {
                 let src_row_ptr = src_base.add((src_off_y + row) * src_pitch + src_off_x);
                 let dst_row_ptr = dst_base.add((intersect_y as usize + row) * dst_pitch + (intersect_x as usize));
 
+                let is_top_or_bottom = (src_off_y + row) == 0 || (src_off_y + row) == (height as usize - 1);
+
+                if !treat_as_transparent && !is_top_or_bottom {
+                     // Fast path for opaque content (middle rows)
+                     let mut start_col = 0;
+                     let mut end_col = copy_width;
+
+                     // Handle Left Border Pixel
+                     if src_off_x == 0 && copy_width > 0 {
+                         if let Some(color) = border_color {
+                             *dst_row_ptr.add(0) = color;
+                         } else {
+                             *dst_row_ptr.add(0) = *src_row_ptr.add(0);
+                         }
+                         start_col = 1;
+                     }
+
+                     // Handle Right Border Pixel
+                     if (src_off_x + copy_width) == (width as usize) && copy_width > start_col {
+                         if let Some(color) = border_color {
+                             *dst_row_ptr.add(copy_width - 1) = color;
+                         } else {
+                             *dst_row_ptr.add(copy_width - 1) = *src_row_ptr.add(copy_width - 1);
+                         }
+                         end_col = copy_width - 1;
+                     }
+
+                     // Bulk Copy
+                     if end_col > start_col {
+                         core::ptr::copy_nonoverlapping(
+                             src_row_ptr.add(start_col),
+                             dst_row_ptr.add(start_col),
+                             end_col - start_col
+                         );
+                     }
+                     continue;
+                }
+
                 for col in 0..copy_width {
                     
                     let in_window_x = src_off_x + col;

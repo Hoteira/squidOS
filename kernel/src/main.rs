@@ -127,7 +127,7 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
                 memory::pmm::free_frame(phys_addr);
 
-                if let Err(_) = interrupts::task::TASK_MANAGER.int_lock().init_user_task(pid_idx, entry, pml4, None, None) {
+                if let Err(_) = interrupts::task::TASK_MANAGER.int_lock().init_user_task(pid_idx, entry, pml4, None, None, "unknown".as_bytes()) {
 
                     panic!("Failed to spawn first user task");
 

@@ -20,6 +20,7 @@ pub struct Task {
     pub fd_table: [i16; 16],
     pub exit_code: u64,
     pub wake_ticks: u64,
+    pub name: [u8; 32],
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -67,15 +68,19 @@ pub(crate) static NULL_TASK: Task = Task {
     fd_table: [-1; 16],
     exit_code: 0,
     wake_ticks: 0,
+    name: [0; 32],
 };
 
 impl Task {
-    pub fn init(&mut self, entry_point: u64, args: Option<&[u64]>) {
+    pub fn init(&mut self, entry_point: u64, args: Option<&[u64]>, name: &[u8]) {
         self.state = TaskState::Ready;
         self.fpu_state = [0; 512];
         self.fd_table = [-1; 16];
         self.exit_code = 0;
         self.wake_ticks = 0;
+        self.name = [0; 32];
+        let len = core::cmp::min(name.len(), 32);
+        self.name[..len].copy_from_slice(&name[..len]);
         
         self.fpu_state[0] = 0x7F;
         self.fpu_state[1] = 0x03;
@@ -119,11 +124,15 @@ impl Task {
     }
 
     #[allow(dead_code)]
-    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, pid: u64, fd_table: Option<[i16; 16]>) -> Result<(), pmm::FrameError> {
+    pub fn init_user(&mut self, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, pid: u64, fd_table: Option<[i16; 16]>, name: &[u8]) -> Result<(), pmm::FrameError> {
         self.fpu_state = [0; 512];
         self.fd_table = fd_table.unwrap_or([-1; 16]);
         self.exit_code = 0;
         self.wake_ticks = 0;
+        self.name = [0; 32];
+        let len = core::cmp::min(name.len(), 32);
+        self.name[..len].copy_from_slice(&name[..len]);
+
         self.fpu_state[0] = 0x7F;
         self.fpu_state[1] = 0x03;
         self.fpu_state[24] = 0x80;
@@ -210,13 +219,13 @@ pub static mut SCRATCH: u64 = 0;
 
 impl TaskManager {
     pub fn init(&mut self) {
-        self.add_task(idle as u64, None);
+        self.add_task(idle as u64, None, b"idle");
     }
 
-    pub fn add_task(&mut self, entry_point: u64, args: Option<&[u64]>) {
+    pub fn add_task(&mut self, entry_point: u64, args: Option<&[u64]>, name: &[u8]) {
         if self.task_count < MAX_TASKS {
             let free_slot = self.get_free_slot();
-            self.tasks[free_slot].init(entry_point, args);
+            self.tasks[free_slot].init(entry_point, args, name);
             self.task_count += 1;
         }
     }
@@ -264,11 +273,11 @@ impl TaskManager {
     }
 
     #[allow(dead_code)]
-    pub fn init_user_task(&mut self, slot: usize, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, fd_table: Option<[i16; 16]>) -> Result<(), pmm::FrameError> {
+    pub fn init_user_task(&mut self, slot: usize, entry_point: u64, pml4_phys: u64, args: Option<&[u64]>, fd_table: Option<[i16; 16]>, name: &[u8]) -> Result<(), pmm::FrameError> {
         if slot >= MAX_TASKS { return Err(pmm::FrameError::IndexOutOfBounds); }
 
         
-        match self.tasks[slot].init_user(entry_point, pml4_phys, args, slot as u64, fd_table) {
+        match self.tasks[slot].init_user(entry_point, pml4_phys, args, slot as u64, fd_table, name) {
             Ok(_) => Ok(()),
             Err(e) => {
                 

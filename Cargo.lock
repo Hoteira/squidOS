@@ -23,6 +23,14 @@ name = "elfic"
 version = "0.1.0"
 
 [[package]]
+name = "fps_test"
+version = "0.1.0"
+dependencies = [
+ "inkui",
+ "std",
+]
+
+[[package]]
 name = "inkui"
 version = "0.1.0"
 dependencies = [
@@ -56,6 +64,13 @@ dependencies = [
 [[package]]
 name = "std"
 version = "0.1.0"
+
+[[package]]
+name = "sysmon"
+version = "0.1.0"
+dependencies = [
+ "std",
+]
 
 [[package]]
 name = "taskbar"
