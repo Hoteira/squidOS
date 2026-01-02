@@ -30,7 +30,7 @@ pub static mut GDT: Gdt = {
     }
 };
 
-#[repr(C, packed)]
+#[repr(C, align(16))]
 pub struct Gdt {
     entries: [Entry; 9],
 }

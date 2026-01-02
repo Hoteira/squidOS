@@ -71,7 +71,7 @@ pub fn print(s: &str) {
 
 pub fn sleep(ms: u64) {
 
-    if ms > 10000 {
+    if ms > 10 {
         unsafe {
             syscall(76, ms, 0, 0);
         }

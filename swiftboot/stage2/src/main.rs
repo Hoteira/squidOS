@@ -153,21 +153,24 @@ fn make_desc(base: u32, limit: u16) -> u64 {
 
 fn protected_mode() {
     unsafe {
+
         let tss_addr = (*(&raw mut GDT)).write_tss();
         (*(&raw mut GDT)).load();
 
-        BOOT.rsdp = get_rsdp();
+
+        //BOOT.rsdp = get_rsdp();
         BOOT.vbe = get_vbe_info();
         BOOT.tss = tss_addr;
         get_mmap();
+
 
         if MODE != 0 {
             let best_mode = find_vbe_mode();
 
             asm!(
-            "int 0x10",
-            in("ax") 0x4F02,
-            in("bx") best_mode
+                "int 0x10",
+                in("ax") 0x4F02,
+                in("bx") best_mode
             );
         }
 

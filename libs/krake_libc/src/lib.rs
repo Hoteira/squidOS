@@ -47,7 +47,6 @@ struct Header { size: usize }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
-    std::println!("malloc({})", size);
     let total = size + core::mem::size_of::<Header>();
     let layout = Layout::from_size_align(total, 8).unwrap();
     let ptr = alloc::alloc::alloc(layout);
@@ -371,8 +370,6 @@ pub unsafe extern "C" fn vsnprintf(str: *mut c_char, size: usize, fmt: *const c_
         written += 1;
     }, fmt, &mut ap);
 
-    std::println!("Formatted string: {}", unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(str as *const u8, written as usize)) });
-
     if size > 0 {
         *str.add(core::cmp::min(written, size - 1)) = 0;
     }
@@ -490,24 +487,23 @@ pub unsafe extern "C" fn krake_get_event(wid: usize, out_event: *mut u32) -> c_i
                 *out_event.add(3) = buttons_scroll & 0xFFFFFF; 
                 *out_event.add(4) = (buttons_scroll >> 24) & 0xFF; 
             },
-            1 => { 
-                
-                
-                
-                
-                
-                let wid_key = *(buf.as_ptr().add(1));
-                let key = (wid_key >> 32) as u32;
-                let flags = *(buf.as_ptr().add(2));
-                let pressed = (flags & 0xFF) as u32;
-                let repeat = ((flags >> 8) & 0xFFFF) as u32;
-                
-                
-                
-                *out_event.add(1) = key;     
-                *out_event.add(2) = repeat;  
-                *out_event.add(3) = pressed; 
-            },
+                        1 => { 
+                            
+                            
+                            
+                            
+                            
+                            let wid_key = *(buf.as_ptr().add(1));
+                            let key = (wid_key >> 32) as u32;
+                            let flags = *(buf.as_ptr().add(2));
+                                            let pressed = (flags & 0xFF) as u32;
+                                            let repeat = ((flags >> 16) & 0xFFFF) as u32;
+                                            
+                                            if pressed == 1 && key == 32 { std::println!("LIBC: Space Key (32) Received"); }
+                            
+                                            *out_event.add(1) = key;                            *out_event.add(2) = repeat;  
+                            *out_event.add(3) = pressed; 
+                        },
             2 => { 
                 let w = *(buf.as_ptr().add(2)) as u32;
                 let h = *(buf.as_ptr().add(3)) as u32;
