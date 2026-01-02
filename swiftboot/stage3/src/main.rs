@@ -7,6 +7,7 @@ mod boot;
 mod paging;
 mod gdt;
 mod tss;
+mod rsdp;
 
 use core::arch::asm;
 use crate::debug::debug;
@@ -15,6 +16,7 @@ use core::panic::PanicInfo;
 use core::ptr::addr_of;
 use crate::boot::BootInfo;
 use crate::gdt::GDT;
+use crate::rsdp::get_rsdp;
 
 pub const NEXT_STAGE_RAM: u64 = 0x1_7e00;
 pub const NEXT_STAGE_LBA: u64 = 5120;
@@ -51,6 +53,7 @@ pub extern "C" fn _start() -> ! {
     unsafe {
         (*bootinfo).kernel_stack = STACK_ADDRESS;
         (*bootinfo).pml4 = 0x2_0000;
+        (*bootinfo).rsdp = get_rsdp();
     }
 
     if BOOT_MODE == 32 {

@@ -114,6 +114,4 @@ MIT License
 
 <div align="center">
 
-*Built with Rust*
-
 </div>
