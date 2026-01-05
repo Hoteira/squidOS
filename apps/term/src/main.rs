@@ -8,11 +8,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 static mut TERM_READ_FD: usize = 0;
 static mut TERM_WRITE_FD: usize = 0;
 
@@ -106,6 +101,7 @@ impl TerminalBuffer {
                 self.alt_lines.clear();
 
 
+
                 self.cursor_row = 0;
             } else {
                 self.cursor_row = self.lines.len().saturating_sub(1);
@@ -115,13 +111,9 @@ impl TerminalBuffer {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024 * 10;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
-    let width = 1000;
-    let height = 800;
+pub extern "C" fn main() -> i32 {
+    let width = 600;
+    let height = 400;
 
     let screen_w = std::graphics::get_screen_width();
     let screen_h = std::graphics::get_screen_height();

@@ -7,11 +7,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 const STDIN_FD: usize = 0;
 const STDOUT_FD: usize = 1;
 
@@ -114,11 +109,7 @@ impl AppState {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024 * 2;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
+pub extern "C" fn main() -> i32 {
     let mut app = AppState::new("@0xE0");
     let mut needs_redraw = true;
 

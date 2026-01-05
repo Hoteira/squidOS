@@ -1,4 +1,4 @@
-use crate::debugln;
+use crate::{debugln, println};
 use crate::interrupts::syscalls::fs::resolve_path;
 use crate::interrupts::task::CPUState;
 use alloc::string::String;
@@ -63,6 +63,7 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
 
     match crate::fs::elf::load_elf(&file_buf, pml4_phys, pid) {
         Ok(entry_point) => {
+            crate::debugln!("spawn_process: load_elf success for {} at {:#x}", actual_path, entry_point);
             let mut new_fd_table = [-1i16; 16];
 
             let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
@@ -94,6 +95,7 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
                 tm.init_user_task(pid_idx, entry_point, pml4_phys, None, Some(new_fd_table), process_name_bytes)
             };
 
+
             match init_res {
                 Ok(_) => Ok(pid),
                 Err(_) => Err(String::from("Failed to init task")),
@@ -103,6 +105,8 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
             Err(e)
         }
     }
+
+
 }
 
 pub fn handle_exit(context: &mut CPUState) {

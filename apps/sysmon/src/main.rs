@@ -7,11 +7,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::os::ProcessInfo;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 const STDIN_FD: usize = 0;
 const STDOUT_FD: usize = 1;
 
@@ -42,57 +37,35 @@ impl AppState {
     }
 
     fn draw(&self) {
-        // Clear screen and home cursor
         std::os::file_write(STDOUT_FD, b"\x1B[2J\x1B[H");
+        std::os::file_write(STDOUT_FD, b"\x1B[1;37;42m SYSMON - System Monitor \x1B[0m\n\n");
+        std::os::file_write(STDOUT_FD, b"\x1B[1m  PID   STATE   NAME\x1B[0m\n");
 
-        // Header
-        let header = format!("\x1B[1;37;44m {:<6} {:<10} {:<30} {:<10} \x1B[0m\n", "PID", "State", "Name", "RAM");
-        std::os::file_write(STDOUT_FD, header.as_bytes());
-
-        // Process List
-        let max_rows = self.screen_height.saturating_sub(2);
-        let end_index = (self.scroll_offset + max_rows).min(self.processes.len());
-
-        for i in self.scroll_offset..end_index {
-            let p = &self.processes[i];
-
+        for (i, proc) in self.processes.iter().enumerate().skip(self.scroll_offset).take(self.screen_height) {
             if i == self.selected_index {
-                std::os::file_write(STDOUT_FD, b"\x1B[38;2;200;160;255m"); // Pastel Purple
-            } else {
-                std::os::file_write(STDOUT_FD, b"\x1B[37m"); // White
+                std::os::file_write(STDOUT_FD, b"\x1B[7m");
             }
 
-            let state_str = match p.state {
-                0 => "Null",
-                1 => "Rsrvd",
-                2 => "Ready",
-                3 => "Zombie",
-                4 => "Sleep",
-                _ => "Unk",
+            let state_str = match proc.state {
+                0 => "RUN  ",
+                1 => "SLEEP",
+                2 => "ZOMB ",
+                _ => "UNKN ",
             };
 
-            let name_str = String::from_utf8_lossy(&p.name);
-            let clean_name = name_str.trim_matches(char::from(0));
+            let name = String::from_utf8_lossy(&proc.name);
+            let name_trimmed = name.trim_matches('\0');
+            
+            let line = format!("  {:<5} {:<7} {}\n", proc.pid, state_str, name_trimmed);
+            std::os::file_write(STDOUT_FD, line.as_bytes());
 
-            let mem_bytes = std::os::get_process_memory(p.pid);
-            let mem_str = if mem_bytes >= 1024 * 1024 {
-                format!("{:.1} MB", mem_bytes as f32 / 1024.0 / 1024.0)
-            } else if mem_bytes >= 1024 {
-                format!("{} KB", mem_bytes / 1024)
-            } else {
-                format!("{} B", mem_bytes)
-            };
-
-            let content = format!(" {:<6} {:<10} {:<30} {:<10}", p.pid, state_str, clean_name, mem_str);
-            let padded = format!("{:<60}\n", content);
-            std::os::file_write(STDOUT_FD, padded.as_bytes());
+            if i == self.selected_index {
+                std::os::file_write(STDOUT_FD, b"\x1B[0m");
+            }
         }
 
-        // Reset colors
-        std::os::file_write(STDOUT_FD, b"\x1B[0m");
-
-        // Status Bar
-        std::os::file_write(STDOUT_FD, b"\n\x1B[90m[W/S] Move  [K] Kill  [R] Refresh  [Q] Quit\x1B[0m");
+        let footer = format!("\n\x1B[90mTotal Processes: {}  [W/S] Move  [K] Kill  [Q] Quit\x1B[0m", self.processes.len());
+        std::os::file_write(STDOUT_FD, footer.as_bytes());
     }
 
     fn move_up(&mut self) {
@@ -107,9 +80,8 @@ impl AppState {
     fn move_down(&mut self) {
         if self.selected_index + 1 < self.processes.len() {
             self.selected_index += 1;
-            let max_rows = self.screen_height.saturating_sub(2);
-            if self.selected_index >= self.scroll_offset + max_rows {
-                self.scroll_offset += 1;
+            if self.selected_index >= self.scroll_offset + self.screen_height {
+                self.scroll_offset = self.selected_index - self.screen_height + 1;
             }
         }
     }
@@ -117,20 +89,16 @@ impl AppState {
     fn kill_selected(&mut self) {
         if self.selected_index < self.processes.len() {
             let pid = self.processes[self.selected_index].pid;
-            if pid > 2 {
-                unsafe { std::os::syscall(62, pid, 9, 0) };
-                self.refresh();
+            unsafe {
+                std::os::syscall(62, pid, 9, 0); // kill(pid, SIGKILL)
             }
+            self.refresh();
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
+pub extern "C" fn main() -> i32 {
     let mut app = AppState::new();
     let mut needs_redraw = true;
 
@@ -164,14 +132,16 @@ pub extern "C" fn _start() -> ! {
                     needs_redraw = true;
                 }
                 'q' | 'Q' => {
-                    // Restore buffer and cursor
+                    // Disable alternate buffer and show cursor
                     std::os::file_write(STDOUT_FD, b"\x1B[?1049l\x1B[?25h");
-                    std::os::exit(0);
+                    return 0;
                 }
                 _ => {}
             }
         } else {
             std::os::yield_task();
+            // Auto refresh every 500ms? 
+            // For now just manual or on input
         }
     }
 }

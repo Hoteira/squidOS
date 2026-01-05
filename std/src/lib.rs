@@ -8,5 +8,15 @@ pub mod graphics;
 pub mod sync;
 pub mod fs;
 
+#[cfg(feature = "userland")]
+pub mod runtime;
+
+#[cfg(feature = "userland")]
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    crate::println!("[USER PANIC] {}", info);
+    crate::os::exit(1);
+}
+
 pub use crate::io::serial::_print;
 

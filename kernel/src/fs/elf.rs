@@ -386,30 +386,16 @@ pub fn load_elf(data: &[u8], target_pml4_phys: u64, pid: u64) -> Result<u64, all
 
     }
 
-
-
-
-
     let entry_point = elf.header.e_entry + load_base;
 
-
-
-
-
     unsafe {
-
         if let Some(phys) = virt_to_phys(target_pml4_phys, entry_point) {
-
             let _code_ptr = phys as *const u8;
 
         } else {}
-
     }
 
-
-
     crate::debugln!("load_elf: END entry_point={:#x}", entry_point);
-
     Ok(entry_point)
 
 }

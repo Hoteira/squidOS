@@ -6,11 +6,6 @@ use inkui::{Color, Display, Size, Widget, Window};
 use std::fs::File;
 use alloc::format;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 fn open_start_menu(_win: &mut Window, _id: usize) {
     std::os::print("Start Menu Clicked\n");
 }
@@ -24,11 +19,7 @@ fn wifi_status(_win: &mut Window, _id: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024 * 10;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
+pub extern "C" fn main() -> i32 {
     let screen_w = std::graphics::get_screen_width();
     let screen_total_h = std::graphics::get_screen_height();
     let screen_h = (screen_total_h * 4) / 100;

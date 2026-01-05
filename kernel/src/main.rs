@@ -117,6 +117,7 @@ pub extern "C" fn _start(bootinfo_ptr: *const BootInfo) -> ! {
 
         match crate::fs::elf::load_elf(&buf[0..n], pml4, pid) {
             Ok(entry) => {
+                crate::debugln!("_start: load_elf success for user.elf at {:#x}", entry);
                 crate::debugln!("ELF loaded successfully. Entry: {:#x}", entry);
 
                 memory::pmm::free_frame(phys_addr);
@@ -232,9 +233,7 @@ pub fn load_idt() {
 
 
 #[panic_handler]
-
 fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::debugln!("KERNEL PANIC: {}", info);
-
     loop {}
 }

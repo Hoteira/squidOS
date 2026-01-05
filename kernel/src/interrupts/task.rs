@@ -1,7 +1,5 @@
+use crate::memory::{paging, pmm};
 use core::arch::{asm, naked_asm};
-
-use crate::debugln;
-use crate::memory::pmm;
 
 #[allow(dead_code)]
 const STACK_SIZE: u64 = 64 * 1024;

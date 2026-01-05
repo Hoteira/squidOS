@@ -54,13 +54,15 @@ pub fn handle_get_events(context: &mut CPUState) {
         if !events.is_empty() {}
 
         let user_slice = core::slice::from_raw_parts_mut(buf_ptr, max_events);
+        let mut count = 0;
         for (i, evt) in events.into_iter().enumerate() {
             if i < max_events {
                 user_slice[i] = evt;
+                count += 1;
             }
         }
+        context.rax = count as u64;
     }
-    context.rax = 1;
 }
 
 pub fn handle_get_width(context: &mut CPUState) {

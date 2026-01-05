@@ -40,8 +40,6 @@ pub unsafe extern "C" fn krake_get_event(wid: usize, out_event: *mut u32) -> c_i
                 let pressed = (flags & 0xFF) as u32;
                 let repeat = ((flags >> 16) & 0xFFFF) as u32;
 
-                if pressed == 1 && key == 32 { std::println!("LIBC: Space Key (32) Received"); }
-
                 *out_event.add(1) = key;
                 *out_event.add(2) = repeat;
                 *out_event.add(3) = pressed;

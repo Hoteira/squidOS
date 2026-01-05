@@ -4,17 +4,8 @@
 extern crate alloc;
 use inkui::{Color, Size, Widget, Window};
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024 * 4;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
+pub extern "C" fn main() -> i32 {
     let width = 640;
     let height = 400;
     let mut win = Window::new("FPS Test", width, height);

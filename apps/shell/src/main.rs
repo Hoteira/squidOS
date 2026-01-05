@@ -8,11 +8,6 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use std::println;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
-
 const STDIN_FD: usize = 0;
 const STDOUT_FD: usize = 1;
 const STDERR_FD: usize = 2;
@@ -124,11 +119,7 @@ fn parse_segment(segment: &str) -> CommandSegment {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    let heap_size = 1024 * 1024;
-    let heap_ptr = std::memory::malloc(heap_size);
-    std::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
+pub extern "C" fn main() -> i32 {
     println!("Shell: Started (Pipes & Redirections Enabled)");
     std::os::file_write(STDOUT_FD, "\nWelcome to KrakeOS Shell \u{E8F0} \n> ".as_bytes());
 
@@ -278,6 +269,7 @@ pub extern "C" fn _start() -> ! {
                                 ];
 
                                 let pid = std::os::spawn_with_fds(&prog_path, &map);
+
                                 if pid != usize::MAX {
                                     children_pids.push(pid);
                                 } else {
