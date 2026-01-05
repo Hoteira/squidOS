@@ -251,6 +251,9 @@ pub fn allocate_memory(bytes: usize, pid: u64) -> Option<u64> {
 
         if found {
             if add_allocation(pid, found_addr, pages) {
+                // ZERO THE ALLOCATED MEMORY
+                core::ptr::write_bytes(found_addr as *mut u8, 0, pages * PAGE_SIZE as usize);
+                
                 unlock_pmm();
                 return Some(found_addr);
             }
@@ -273,6 +276,9 @@ pub fn reserve_frames(addr: u64, count: usize) -> bool {
             return false;
         }
         let res = add_allocation(0, addr, count);
+        if res {
+            core::ptr::write_bytes(addr as *mut u8, 0, count * PAGE_SIZE as usize);
+        }
         unlock_pmm();
         res
     }

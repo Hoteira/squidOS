@@ -99,9 +99,10 @@ impl Task {
             self.pml4_phys = (*(&raw const crate::boot::BOOT_INFO)).pml4;
         }
 
-        self.stack = pmm::allocate_frames(16, 0).expect("Task init: OOM");
+        let stack_pages = (STACK_SIZE / 4096) as usize;
+        self.stack = pmm::allocate_frames(stack_pages, 0).expect("Task init: OOM");
 
-        let stack_top = self.stack + 4096 * 16;
+        let stack_top = self.stack + STACK_SIZE;
         self.kernel_stack = stack_top;
 
         let state_size = core::mem::size_of::<CPUState>();
@@ -158,19 +159,17 @@ impl Task {
         };
         self.kernel_stack = k_frame + 4096 * 16;
 
-        let u_frame = match pmm::allocate_frames(16, pid) {
+        let stack_pages = (STACK_SIZE / 4096) as usize;
+        let u_frame = match pmm::allocate_frames(stack_pages, pid) {
             Some(addr) => addr,
             None => {
-                pmm::free_frame(k_frame);
-
-
                 pmm::free_frame(k_frame);
                 return Err(pmm::FrameError::NoMemory);
             }
         };
         self.stack = u_frame;
 
-        let u_stack_top = u_frame + 4096 * 16;
+        let u_stack_top = u_frame + STACK_SIZE;
 
         let state_size = core::mem::size_of::<CPUState>();
         let state_ptr = (self.kernel_stack - state_size as u64) as *mut CPUState;
@@ -182,6 +181,26 @@ impl Task {
         }
 
         unsafe {
+            // Setup a clean stack for System V ABI:
+            // [u_stack_top - 128..u_stack_top] : Program Name (Strings)
+            // [u_stack_top - 160..u_stack_top-128] : argv array pointers
+            // [u_stack_top - 168] : argc (The entry RSP)
+            
+            let name_len = core::cmp::min(name.len(), 63);
+            let name_addr = u_stack_top - 128; 
+            let name_ptr = name_addr as *mut u8;
+            core::ptr::copy_nonoverlapping(name.as_ptr(), name_ptr, name_len);
+            *name_ptr.add(name_len) = 0;
+
+            let stack_ptrs = u_stack_top - 160;
+            let stack_ptr_u64 = stack_ptrs as *mut u64;
+            stack_ptr_u64.add(0).write(name_addr); // argv[0]
+            stack_ptr_u64.add(1).write(0);         // argv[1] (NULL)
+            stack_ptr_u64.add(2).write(0);         // envp[0] (NULL)
+
+            let argc_addr = u_stack_top - 168;
+            *(argc_addr as *mut u64) = 1;          // argc = 1
+
             (*state_ptr).rax = 0;
             (*state_ptr).rbx = if arg_count > 0 { args.unwrap()[0] } else { 0 };
             (*state_ptr).rcx = if arg_count > 1 { args.unwrap()[1] } else { 0 };
@@ -194,7 +213,7 @@ impl Task {
             (*state_ptr).rip = entry_point;
             (*state_ptr).cs = 0x33;
             (*state_ptr).rflags = 0x202;
-            (*state_ptr).rsp = u_stack_top - 8;
+            (*state_ptr).rsp = argc_addr; // 16n + 8 alignment (since u_stack_top is 4096n)
             (*state_ptr).ss = 0x23;
         }
 

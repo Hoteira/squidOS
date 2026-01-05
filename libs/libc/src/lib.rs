@@ -36,14 +36,17 @@ pub unsafe extern "C" fn _start() -> ! {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_start(stack: *const usize) -> ! {
-
-    std::println!("STARTING C PORTED PROGRAM");
-
     let size = 10 * 1024 * 1024;
-    let ptr = std::memory::malloc(size) as *mut u8;
+    let ptr_raw = std::memory::malloc(size);
+    if ptr_raw == usize::MAX || ptr_raw == 0 {
+        loop { unsafe { core::arch::asm!("hlt"); } }
+    }
+    let ptr = ptr_raw as *mut u8;
     std::memory::heap::init_heap(ptr, size);
+
     let argc = *stack as c_int;
     let argv = stack.add(1) as *mut *mut c_char;
+
     let result = main(argc, argv);
     stdlib::exit(result);
 }

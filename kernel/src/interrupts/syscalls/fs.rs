@@ -464,7 +464,7 @@ pub fn handle_read_file(context: &mut CPUState) {
     let local_fd = context.rdi as usize;
     let buf_ptr = context.rsi as *mut u8;
     let len = context.rdx as usize;
-    if local_fd > 2 {
+    if local_fd > 3 {
         crate::debugln!("[SYS_READ_FILE] fd: {}, ptr: {:p}, len: {}", local_fd, buf_ptr, len);
     }
     

@@ -177,34 +177,37 @@ pub fn handle_kill(context: &mut CPUState) {
 
 pub fn handle_wait_pid(context: &mut CPUState) {
     let target_pid = context.rdi as usize;
+    if target_pid >= crate::interrupts::task::MAX_TASKS {
+        context.rax = u64::MAX;
+        return;
+    }
+
     let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
-    if target_pid < crate::interrupts::task::MAX_TASKS {
-        match tm.tasks[target_pid].state {
-            crate::interrupts::task::TaskState::Ready | crate::interrupts::task::TaskState::Reserved => {
-                context.rax = u64::MAX;
+    let task = &tm.tasks[target_pid];
+
+    match task.state {
+        crate::interrupts::task::TaskState::Zombie => {
+            let exit_code = task.exit_code;
+            context.rax = exit_code;
+
+            let pid = target_pid as u64;
+            let k_stack_top = task.kernel_stack;
+
+            crate::memory::pmm::free_frames_by_pid(pid);
+
+            if k_stack_top != 0 {
+                let k_stack_start = k_stack_top - (1024 * 1024);
+                crate::memory::pmm::free_frame(k_stack_start);
             }
-            crate::interrupts::task::TaskState::Zombie => {
-                let exit_code = tm.tasks[target_pid].exit_code;
-                context.rax = exit_code;
 
-                let pid = target_pid as u64;
-                let k_stack_top = tm.tasks[target_pid].kernel_stack;
-
-                crate::memory::pmm::free_frames_by_pid(pid);
-
-                if k_stack_top != 0 {
-                    let k_stack_start = k_stack_top - (4096 * 16);
-                    crate::memory::pmm::free_frame(k_stack_start);
-                }
-
-                tm.tasks[target_pid] = crate::interrupts::task::NULL_TASK;
-            }
-            _ => {
-                context.rax = 0;
-            }
+            tm.tasks[target_pid] = crate::interrupts::task::NULL_TASK;
         }
-    } else {
-        context.rax = 0;
+        crate::interrupts::task::TaskState::Null => {
+            context.rax = 0;
+        }
+        _ => {
+            context.rax = u64::MAX;
+        }
     }
 }
 
