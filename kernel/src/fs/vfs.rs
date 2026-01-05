@@ -79,7 +79,7 @@ pub fn increment_ref(fd: usize) {
 
 pub fn open(disk_id: u8, path_str: &str) -> Result<Box<dyn VfsNode>, String> {
     crate::debugln!("vfs::open: start path='{}' (len={})", path_str, path_str.len());
-    
+
     crate::debugln!("vfs::open: disk_id check...");
 
 

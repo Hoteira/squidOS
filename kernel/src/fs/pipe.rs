@@ -86,4 +86,9 @@ impl Pipe {
         let inner = self.inner.lock();
         inner.count
     }
+
+    pub fn is_closed(&self) -> bool {
+        let inner = self.inner.lock();
+        inner.closed
+    }
 }

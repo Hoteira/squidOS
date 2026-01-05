@@ -55,7 +55,7 @@ impl AppState {
 
             let name = String::from_utf8_lossy(&proc.name);
             let name_trimmed = name.trim_matches('\0');
-            
+
             let line = format!("  {:<5} {:<7} {}\n", proc.pid, state_str, name_trimmed);
             std::os::file_write(STDOUT_FD, line.as_bytes());
 

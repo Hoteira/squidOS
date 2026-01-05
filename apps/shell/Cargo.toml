@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 std = { path = "../../std" }
+log = "0.4.29"

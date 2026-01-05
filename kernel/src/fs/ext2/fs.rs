@@ -661,223 +661,173 @@ impl VfsNode for Ext2Node {
         Ok(bytes_written)
     }
 
-        fn children(&mut self) -> Result<Vec<Box<dyn VfsNode>>, String> {
-
-            if self.kind() != FileType::Directory {
-
-                return Err(String::from("Not a directory"));
-
-            }
-
-            
-
-            let fs = unsafe { &mut *self.fs };
-
-            let block_size = fs.block_size as usize;
-
-            let mut entries = Vec::new();
-
-            let mut buf = alloc::vec![0u8; block_size];
-
-            
-
-            let mut offset = 0;
-
-            let total_size = self.size();
-
-            
-
-            while offset < total_size {
-
-                // Determine physical block for this offset
-
-                let block_idx = (offset / block_size as u64) as u32;
-
-                let phys = fs.get_block_address(&self.inode, block_idx);
-
-                
-
-                if phys != 0 {
-
-                    fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
-
-                    
-
-                    let mut block_pos = 0;
-
-                    while block_pos < block_size {
-
-                        let ptr = unsafe { buf.as_ptr().add(block_pos) };
-
-                        let entry = unsafe { &*(ptr as *const DirectoryEntry) };
-
-                        
-
-                        if entry.rec_len == 0 { break; }
-
-                        
-
-                        if entry.inode != 0 {
-
-                            let name_len = entry.name_len as usize;
-
-                            let name_ptr = unsafe { ptr.add(8) };
-
-                            if block_pos + 8 + name_len > block_size { break; }
-
-                            
-
-                            let name_slice = unsafe { core::slice::from_raw_parts(name_ptr, name_len) };
-
-                            let name = String::from_utf8_lossy(name_slice).into_owned();
-
-                            
-
-                            // Only read the inode if we need to return full nodes. 
-
-                            // Note: Reading inodes for *every* child is still heavy, but memory usage is lower per loop iteration.
-
-                            // Optimization: We could lazy-load inodes, but VfsNode requires size/kind immediately.
-
-                            let child_inode = fs.read_inode(entry.inode);
-
-                            entries.push(Box::new(Ext2Node {
-
-                                fs: self.fs,
-
-                                inode_idx: entry.inode,
-
-                                inode: child_inode,
-
-                                name,
-
-                            }) as Box<dyn VfsNode>);
-
-                        }
-
-                        block_pos += entry.rec_len as usize;
-
-                    }
-
-                }
-
-                offset += block_size as u64;
-
-            }
-
-            
-
-            Ok(entries)
-
+    fn children(&mut self) -> Result<Vec<Box<dyn VfsNode>>, String> {
+        if self.kind() != FileType::Directory {
+            return Err(String::from("Not a directory"));
         }
 
-    
 
-        fn find(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
+        let fs = unsafe { &mut *self.fs };
 
-            if self.kind() != FileType::Directory {
+        let block_size = fs.block_size as usize;
 
-                return Err(String::from("Not a directory"));
+        let mut entries = Vec::new();
 
+        let mut buf = alloc::vec![0u8; block_size];
+
+
+        let mut offset = 0;
+
+        let total_size = self.size();
+
+
+        while offset < total_size {
+
+            // Determine physical block for this offset
+
+            let block_idx = (offset / block_size as u64) as u32;
+
+            let phys = fs.get_block_address(&self.inode, block_idx);
+
+
+            if phys != 0 {
+                fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
+
+
+                let mut block_pos = 0;
+
+                while block_pos < block_size {
+                    let ptr = unsafe { buf.as_ptr().add(block_pos) };
+
+                    let entry = unsafe { &*(ptr as *const DirectoryEntry) };
+
+
+                    if entry.rec_len == 0 { break; }
+
+
+                    if entry.inode != 0 {
+                        let name_len = entry.name_len as usize;
+
+                        let name_ptr = unsafe { ptr.add(8) };
+
+                        if block_pos + 8 + name_len > block_size { break; }
+
+
+                        let name_slice = unsafe { core::slice::from_raw_parts(name_ptr, name_len) };
+
+                        let name = String::from_utf8_lossy(name_slice).into_owned();
+
+
+                        // Only read the inode if we need to return full nodes. 
+
+                        // Note: Reading inodes for *every* child is still heavy, but memory usage is lower per loop iteration.
+
+                        // Optimization: We could lazy-load inodes, but VfsNode requires size/kind immediately.
+
+                        let child_inode = fs.read_inode(entry.inode);
+
+                        entries.push(Box::new(Ext2Node {
+                            fs: self.fs,
+
+                            inode_idx: entry.inode,
+
+                            inode: child_inode,
+
+                            name,
+
+                        }) as Box<dyn VfsNode>);
+                    }
+
+                    block_pos += entry.rec_len as usize;
+                }
             }
 
-    
+            offset += block_size as u64;
+        }
 
-            let fs = unsafe { &mut *self.fs };
 
-            let block_size = fs.block_size as usize;
+        Ok(entries)
+    }
 
-            let mut buf = alloc::vec![0u8; block_size];
 
-            
+    fn find(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
+        if self.kind() != FileType::Directory {
+            return Err(String::from("Not a directory"));
+        }
 
-            let mut offset = 0;
 
-            let total_size = self.size();
+        let fs = unsafe { &mut *self.fs };
 
-            let name_bytes = name.as_bytes();
+        let block_size = fs.block_size as usize;
 
-            
+        let mut buf = alloc::vec![0u8; block_size];
 
-            while offset < total_size {
 
-                let block_idx = (offset / block_size as u64) as u32;
+        let mut offset = 0;
 
-                let phys = fs.get_block_address(&self.inode, block_idx);
+        let total_size = self.size();
 
-                
+        let name_bytes = name.as_bytes();
 
-                if phys != 0 {
 
-                    fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
+        while offset < total_size {
+            let block_idx = (offset / block_size as u64) as u32;
 
-                    
+            let phys = fs.get_block_address(&self.inode, block_idx);
 
-                    let mut block_pos = 0;
 
-                    while block_pos < block_size {
+            if phys != 0 {
+                fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
 
-                        let ptr = unsafe { buf.as_ptr().add(block_pos) };
 
-                        let entry = unsafe { &*(ptr as *const DirectoryEntry) };
+                let mut block_pos = 0;
 
-                        
+                while block_pos < block_size {
+                    let ptr = unsafe { buf.as_ptr().add(block_pos) };
 
-                        if entry.rec_len == 0 { break; }
+                    let entry = unsafe { &*(ptr as *const DirectoryEntry) };
 
-                        
 
-                        if entry.inode != 0 {
+                    if entry.rec_len == 0 { break; }
 
-                            let name_len = entry.name_len as usize;
 
-                            if block_pos + 8 + name_len <= block_size {
+                    if entry.inode != 0 {
+                        let name_len = entry.name_len as usize;
 
-                                let entry_name_ptr = unsafe { ptr.add(8) };
+                        if block_pos + 8 + name_len <= block_size {
+                            let entry_name_ptr = unsafe { ptr.add(8) };
 
-                                let entry_name = unsafe { core::slice::from_raw_parts(entry_name_ptr, name_len) };
+                            let entry_name = unsafe { core::slice::from_raw_parts(entry_name_ptr, name_len) };
 
-                                
 
-                                if entry_name == name_bytes {
+                            if entry_name == name_bytes {
+                                let child_inode = fs.read_inode(entry.inode);
 
-                                    let child_inode = fs.read_inode(entry.inode);
+                                return Ok(Box::new(Ext2Node {
+                                    fs: self.fs,
 
-                                    return Ok(Box::new(Ext2Node {
+                                    inode_idx: entry.inode,
 
-                                        fs: self.fs,
+                                    inode: child_inode,
 
-                                        inode_idx: entry.inode,
+                                    name: String::from(name),
 
-                                        inode: child_inode,
-
-                                        name: String::from(name),
-
-                                    }));
-
-                                }
-
+                                }));
                             }
-
                         }
-
-                        block_pos += entry.rec_len as usize;
-
                     }
 
+                    block_pos += entry.rec_len as usize;
                 }
-
-                offset += block_size as u64;
-
             }
 
-            
-
-            Err(String::from("File not found"))
-
+            offset += block_size as u64;
         }
 
-    
+
+        Err(String::from("File not found"))
+    }
+
 
     fn create_file(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
         self.create_node(name, 0x81B4)
@@ -985,86 +935,82 @@ impl VfsNode for Ext2Node {
             }
             offset += fs.block_size as u64;
         }
-                    Err(String::from("File not found"))
-                }
-        
-            fn read_dir(&mut self, start_index: u64, buffer: &mut [u8]) -> Result<(usize, usize), String> {
-                let fs = unsafe { &mut *self.fs };
-                let block_size = fs.block_size as usize;
-                
-                let mut bytes_written = 0;
-                let mut count_read = 0;
-                let mut entry_index: u64 = 0;
-                let mut offset = 0;
-                let total_size = self.size();
-                
-                let mut block_buf = alloc::vec![0u8; block_size];
-        
-                while offset < total_size {
-                    let block_idx = (offset / block_size as u64) as u32;
-                    let phys = fs.get_block_address(&self.inode, block_idx);
-                    
-                    if phys != 0 {
-                        fs.read_disk_data(phys as u64 * block_size as u64, &mut block_buf);
-                        
-                        let mut block_pos = 0;
-                        while block_pos < block_size {
-                            let ptr = unsafe { block_buf.as_ptr().add(block_pos) };
-                            let entry = unsafe { &*(ptr as *const DirectoryEntry) };
-                            
-                            if entry.rec_len == 0 { break; }
-                            
-                            if entry.inode != 0 {
-                                if entry_index >= start_index {
-                                    let name_len = entry.name_len as usize;
-                                    
-                                    // Check if entry fits in remaining buffer
-                                    if bytes_written + 2 + name_len > buffer.len() {
-                                        return Ok((bytes_written, count_read));
-                                    }
-                                    
-                                                                let child_inode = fs.read_inode(entry.inode);
-                                    
-                                                                let mapped_type = if (child_inode.mode & 0xF000) == 0x4000 {
-                                    
-                                                                    2 // Directory
-                                    
-                                                                } else if (child_inode.mode & 0xF000) == 0x8000 {
-                                    
-                                                                    1 // File
-                                    
-                                                                } else {
-                                    
-                                                                    0 // Unknown
-                                    
-                                                                };
-                                    
-                                    
-                                    
-                                                                buffer[bytes_written] = mapped_type;
-                                    
-                                    
-                                    buffer[bytes_written + 1] = name_len as u8;
-                                    
-                                    let name_ptr = unsafe { ptr.add(8) };
-                                    unsafe {
-                                        core::ptr::copy_nonoverlapping(name_ptr, buffer.as_mut_ptr().add(bytes_written + 2), name_len);
-                                    }
-                                    
-                                    bytes_written += 2 + name_len;
-                                    count_read += 1;
-                                }
-                                entry_index += 1;
+        Err(String::from("File not found"))
+    }
+
+    fn read_dir(&mut self, start_index: u64, buffer: &mut [u8]) -> Result<(usize, usize), String> {
+        let fs = unsafe { &mut *self.fs };
+        let block_size = fs.block_size as usize;
+
+        let mut bytes_written = 0;
+        let mut count_read = 0;
+        let mut entry_index: u64 = 0;
+        let mut offset = 0;
+        let total_size = self.size();
+
+        let mut block_buf = alloc::vec![0u8; block_size];
+
+        while offset < total_size {
+            let block_idx = (offset / block_size as u64) as u32;
+            let phys = fs.get_block_address(&self.inode, block_idx);
+
+            if phys != 0 {
+                fs.read_disk_data(phys as u64 * block_size as u64, &mut block_buf);
+
+                let mut block_pos = 0;
+                while block_pos < block_size {
+                    let ptr = unsafe { block_buf.as_ptr().add(block_pos) };
+                    let entry = unsafe { &*(ptr as *const DirectoryEntry) };
+
+                    if entry.rec_len == 0 { break; }
+
+                    if entry.inode != 0 {
+                        if entry_index >= start_index {
+                            let name_len = entry.name_len as usize;
+
+                            // Check if entry fits in remaining buffer
+                            if bytes_written + 2 + name_len > buffer.len() {
+                                return Ok((bytes_written, count_read));
                             }
-                            block_pos += entry.rec_len as usize;
+
+                            let child_inode = fs.read_inode(entry.inode);
+
+                            let mapped_type = if (child_inode.mode & 0xF000) == 0x4000 {
+                                2 // Directory
+
+                            } else if (child_inode.mode & 0xF000) == 0x8000 {
+                                1 // File
+
+                            } else {
+                                0 // Unknown
+
+                            };
+
+
+                            buffer[bytes_written] = mapped_type;
+
+
+                            buffer[bytes_written + 1] = name_len as u8;
+
+                            let name_ptr = unsafe { ptr.add(8) };
+                            unsafe {
+                                core::ptr::copy_nonoverlapping(name_ptr, buffer.as_mut_ptr().add(bytes_written + 2), name_len);
+                            }
+
+                            bytes_written += 2 + name_len;
+                            count_read += 1;
                         }
+                        entry_index += 1;
                     }
-                    offset += block_size as u64;
+                    block_pos += entry.rec_len as usize;
                 }
-                
-                Ok((bytes_written, count_read))
             }
-            fn rename(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+            offset += block_size as u64;
+        }
+
+        Ok((bytes_written, count_read))
+    }
+    fn rename(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
         let _child = self.find(old_name)?;
 
 

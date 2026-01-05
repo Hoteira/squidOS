@@ -2,11 +2,11 @@
 #![no_main]
 
 extern crate alloc;
-use inkui::{Color, Size, Widget, Window};
-use std::fs::File;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use inkui::{Color, Size, Widget, Window};
+use std::fs::File;
 
 static mut TERM_READ_FD: usize = 0;
 static mut TERM_WRITE_FD: usize = 0;
@@ -99,7 +99,6 @@ impl TerminalBuffer {
             self.is_alt = alt;
             if self.is_alt {
                 self.alt_lines.clear();
-
 
 
                 self.cursor_row = 0;

@@ -1,4 +1,5 @@
 use core::arch::asm;
+use crate::debugln;
 
 pub unsafe fn syscall(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     let result: u64;
@@ -66,6 +67,12 @@ pub unsafe fn syscall5(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg
 pub fn print(s: &str) {
     unsafe {
         syscall(1, 1, s.as_ptr() as u64, s.len() as u64);
+    }
+}
+
+pub fn debug_print(s: &str) {
+    unsafe {
+        syscall(9, s.as_ptr() as u64, s.len() as u64, 0);
     }
 }
 

@@ -6,7 +6,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-use std::println;
+use log::debug;
+use std::{debugln, println};
 
 const STDIN_FD: usize = 0;
 const STDOUT_FD: usize = 1;
@@ -213,55 +214,48 @@ pub extern "C" fn main() -> i32 {
                             _ => false
                         };
 
-                                                if is_builtin {
-                                                     execute_builtin(&parsed.cmd, &parsed.args, &mut cwd, &mut path_env, stdin_fd, stdout_fd);
-                                                } else {
-                                                                            let mut prog_path = String::new();
-                                                    let mut found = false;
-                        
-                                                                                if parsed.cmd.starts_with('@') || parsed.cmd.contains('/') {
-                        
-                                                                                    prog_path = resolve_path(&cwd, &parsed.cmd);
-                        
-                                                                                    if let Ok(_) = std::fs::File::open(&prog_path) {
-                        
-                                                                                        found = true;
-                        
-                                                                                    }
-                        
-                                                                                } else {
-                        
-                                                    
-                                                        for path_dir in path_env.split(';') {
-                                                            let mut p = format!("{}/{}", path_dir, parsed.cmd);
-                                                            if !parsed.cmd.ends_with(".elf") {
-                                                                p.push_str(".elf");
-                                                            }
-                                                            
-                                                            if let Ok(_) = std::fs::File::open(&p) {
-                                                                prog_path = p;
-                                                                found = true;
-                                                                break;
-                                                            }
-                                                            
-                                                            if !found && (path_dir.ends_with("/apps") || path_dir == "@0xE0/apps") {
-                                                                let apps_dir = format!("{}/{}", path_dir, parsed.cmd);
-                                                                if let Ok(entries) = std::fs::read_dir(&apps_dir) {
-                                                                    for entry in entries {
-                                                                        if entry.file_type == std::fs::FileType::File && entry.name.ends_with(".elf") {
-                                                                            prog_path = format!("{}/{}", apps_dir, entry.name);
-                                                                            found = true;
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                            if found { break; }
-                                                        }
-                                                    }
-                                                    
-                                                    if found {
-                        
+                        if is_builtin {
+                            execute_builtin(&parsed.cmd, &parsed.args, &mut cwd, &mut path_env, stdin_fd, stdout_fd);
+                        } else {
+                            let mut prog_path = String::new();
+                            let mut found = false;
+
+                            if parsed.cmd.starts_with('@') || parsed.cmd.contains('/') {
+                                prog_path = resolve_path(&cwd, &parsed.cmd);
+
+                                if let Ok(_) = std::fs::File::open(&prog_path) {
+                                    found = true;
+                                }
+                            } else {
+                                for path_dir in path_env.split(';') {
+                                    let mut p = format!("{}/{}", path_dir, parsed.cmd);
+                                    if !parsed.cmd.ends_with(".elf") {
+                                        p.push_str(".elf");
+                                    }
+
+                                    if let Ok(_) = std::fs::File::open(&p) {
+                                        prog_path = p;
+                                        found = true;
+                                        break;
+                                    }
+
+                                    if !found && (path_dir.ends_with("/apps") || path_dir == "@0xE0/apps") {
+                                        let apps_dir = format!("{}/{}", path_dir, parsed.cmd);
+                                        if let Ok(entries) = std::fs::read_dir(&apps_dir) {
+                                            for entry in entries {
+                                                if entry.file_type == std::fs::FileType::File && entry.name.ends_with(".elf") {
+                                                    prog_path = format!("{}/{}", apps_dir, entry.name);
+                                                    found = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if found { break; }
+                                }
+                            }
+
+                            if found {
                                 let map = [
                                     (0, stdin_fd as u8),
                                     (1, stdout_fd as u8),

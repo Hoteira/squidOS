@@ -1,10 +1,9 @@
 use crate::interrupts::task::CPUState;
 use alloc::string::String;
 
-pub fn handle_print(context: &mut CPUState) {
-    let _fd = context.rdi;
-    let ptr = context.rsi;
-    let len = context.rdx as usize;
+pub fn handle_debug_print(context: &mut CPUState) {
+    let ptr = context.rdi;
+    let len = context.rsi as usize;
 
     let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
     let str_val = String::from_utf8_lossy(s);

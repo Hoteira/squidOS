@@ -1,7 +1,7 @@
 use super::consts::*;
 use super::structs::*;
-use crate::memory::pmm;
 use crate::debugln;
+use crate::memory::pmm;
 use core::ptr::{read_volatile, write_volatile};
 use std::memory::mmio::{read_16, write_16, write_64};
 

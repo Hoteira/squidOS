@@ -6,7 +6,7 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
-use core::ffi::{c_char, c_int};
+use core::ffi::c_int;
 
 pub mod string;
 pub mod ctype;

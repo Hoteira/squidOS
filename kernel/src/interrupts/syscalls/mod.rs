@@ -4,6 +4,8 @@ use core::arch::naked_asm;
 
 pub mod fs;
 pub use process::spawn_process;
+use std::println;
+
 pub mod process;
 pub mod memory;
 pub mod window;
@@ -29,6 +31,7 @@ pub const SYS_CHDIR: u64 = 80;
 pub const SYS_RENAME: u64 = 82;
 pub const SYS_MKDIR: u64 = 83;
 pub const SYS_RMDIR: u64 = 84;
+pub const SYS_CREATE: u64 = 85;
 pub const SYS_UNLINK: u64 = 87;
 
 // KrakeOS Custom
@@ -46,6 +49,8 @@ pub const SYS_GET_PROCESS_LIST: u64 = 110;
 pub const SYS_GET_PROCESS_MEM: u64 = 111;
 pub const SYS_MALLOC: u64 = 112;
 pub const SYS_FREE: u64 = 113;
+pub const SYS_DEBUG_PRINT: u64 = 9;
+pub const SYS_MOUNT: u64 = 165;
 
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -126,6 +131,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
         SYS_CHDIR => fs::handle_chdir(context),
         SYS_RENAME => fs::handle_rename(context),
         SYS_MKDIR => fs::handle_create(context, 83),
+        SYS_CREATE => fs::handle_create(context, 85),
         SYS_RMDIR => fs::handle_remove(context),
         SYS_UNLINK => fs::handle_remove(context),
 
@@ -142,8 +148,12 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
         SYS_GET_PROCESS_MEM => memory::handle_get_process_mem(context),
         SYS_MALLOC => memory::handle_malloc(context),
         SYS_FREE => memory::handle_free(context),
-        
-        9 | 10 | 11 | 12 => {
+        SYS_DEBUG_PRINT => misc::handle_debug_print(context),
+        SYS_MOUNT => {
+            context.rax = 0; // Stub
+        }
+
+        10 | 11 | 12 => {
             context.rax = 0;
         }
 

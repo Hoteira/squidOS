@@ -2,10 +2,10 @@
 #![no_main]
 
 extern crate alloc;
-use std::fs;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use std::fs;
 
 const STDIN_FD: usize = 0;
 const STDOUT_FD: usize = 1;

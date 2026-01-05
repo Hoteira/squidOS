@@ -4,7 +4,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::{PollFd, POLLERR, POLLIN, POLLNVAL, POLLOUT};
-use super::SYS_MKDIR;
 
 pub fn resolve_path(cwd: &str, path: &str) -> String {
     if path.starts_with('@') {
@@ -125,7 +124,7 @@ pub fn handle_chdir(context: &mut CPUState) {
     let ptr = context.rdi as *const u8;
     let len = context.rsi as usize;
     crate::debugln!("[SYS_CHDIR] ptr: {:p}, len: {}", ptr, len);
-    
+
     let path_str_full = if ptr.is_null() || len == 0 {
         String::from("")
     } else {
@@ -326,7 +325,7 @@ pub fn handle_rename(context: &mut CPUState) {
     let new_ptr = context.rdx as *const u8;
     let new_len = context.r10 as usize;
     crate::debugln!("[SYS_RENAME] old_ptr: {:p}, old_len: {}, new_ptr: {:p}, new_len: {}", old_ptr, old_len, new_ptr, new_len);
-    
+
     let s_old = unsafe { core::slice::from_raw_parts(old_ptr, old_len) };
     let s_new = unsafe { core::slice::from_raw_parts(new_ptr, new_len) };
     let path_old = String::from_utf8_lossy(s_old);
@@ -352,13 +351,13 @@ pub fn handle_rename(context: &mut CPUState) {
         return;
     }
 
-         let disk_part = &parts_old[0][1..];
-         let disk_id = if disk_part.starts_with("0x") || disk_part.starts_with("0X") {
-             u8::from_str_radix(&disk_part[2..], 16).unwrap_or(0xFF)
-         } else {
-             disk_part.parse::<u8>().unwrap_or_else(|_| u8::from_str_radix(disk_part, 16).unwrap_or(0xFF))
-         };
-        let actual_old = if parts_old.len() > 1 { parts_old[1..].join("/") } else { String::from("") };
+    let disk_part = &parts_old[0][1..];
+    let disk_id = if disk_part.starts_with("0x") || disk_part.starts_with("0X") {
+        u8::from_str_radix(&disk_part[2..], 16).unwrap_or(0xFF)
+    } else {
+        disk_part.parse::<u8>().unwrap_or_else(|_| u8::from_str_radix(disk_part, 16).unwrap_or(0xFF))
+    };
+    let actual_old = if parts_old.len() > 1 { parts_old[1..].join("/") } else { String::from("") };
 
     let parts_new: Vec<&str> = resolved_new.split('/').collect();
     let actual_new = if parts_new.len() > 1 { parts_new[1..].join("/") } else { String::from("") };
@@ -467,7 +466,7 @@ pub fn handle_read_file(context: &mut CPUState) {
     if local_fd > 3 {
         crate::debugln!("[SYS_READ_FILE] fd: {}, ptr: {:p}, len: {}", local_fd, buf_ptr, len);
     }
-    
+
     let global_fd_opt = {
         let tm = crate::interrupts::task::TASK_MANAGER.int_lock();
         let current = tm.current_task;
@@ -559,7 +558,9 @@ pub fn handle_write_file(context: &mut CPUState) {
     }
 
     if local_fd == 1 || local_fd == 2 {
-        super::misc::handle_print(context);
+        // By default, stdout/stderr do nothing if not redirected.
+        // User wants NEVER EVER serial for println.
+        context.rax = len as u64;
         return;
     }
 
@@ -590,7 +591,7 @@ pub fn handle_read_dir(context: &mut CPUState) {
 
     if let Some(fd) = global_fd_opt {
         if let Some(handle) = crate::fs::vfs::get_file(fd) {
-            use crate::fs::vfs::{FileHandle, FileType};
+            use crate::fs::vfs::FileHandle;
             match handle {
                 FileHandle::File { node, offset } => {
                     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };

@@ -106,16 +106,27 @@ pub unsafe extern "C" fn mkstemps(_template: *mut c_char, _suffix_len: c_int) ->
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn realpath(path: *const c_char, resolved_path: *mut c_char) -> *mut c_char {
-    // Simplified: just copy path to resolved_path if provided, or malloc it.
-    let len = crate::string::strlen(path);
+    let p_str = core::ffi::CStr::from_ptr(path).to_string_lossy();
+    let mut resolved = alloc::string::String::new();
+
+    if p_str == "." {
+        resolved = alloc::string::String::from("@0xE0/");
+    } else if !p_str.starts_with('@') {
+        resolved = alloc::format!("@0xE0/{}", p_str);
+    } else {
+        resolved = p_str.into_owned();
+    }
+
     let res = if !resolved_path.is_null() {
         resolved_path
     } else {
-        crate::stdlib::malloc(len + 1) as *mut c_char
+        crate::stdlib::malloc(resolved.len() + 1) as *mut c_char
     };
 
     if !res.is_null() {
-        crate::string::strcpy(res, path);
+        let bytes = resolved.as_bytes();
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), res as *mut u8, bytes.len());
+        *res.add(bytes.len()) = 0;
     }
     res
 }

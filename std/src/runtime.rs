@@ -1,5 +1,5 @@
-use core::arch::naked_asm;
 use crate::println;
+use core::arch::naked_asm;
 
 #[unsafe(no_mangle)]
 #[unsafe(naked)]
@@ -22,8 +22,6 @@ pub unsafe extern "C" fn rust_start(stack: *const usize) -> ! {
         crate::os::exit(1);
     }
     crate::memory::heap::init_heap(heap_ptr as *mut u8, heap_size);
-
-    crate::os::print("[DEBUG] Runtime started\n");
 
     unsafe extern "C" {
         fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i32;

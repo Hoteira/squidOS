@@ -93,6 +93,14 @@ pub unsafe extern "C" fn puts(s: *const c_char) -> c_int {
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn krake_debug_printf(f: *const c_char, mut args: ...) -> c_int {
+    printf_core(|b| {
+        let buf = [b];
+        std::os::debug_print(core::str::from_utf8_unchecked(&buf));
+    }, f, &mut args.as_va_list())
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn printf(f: *const c_char, mut args: ...) -> c_int {
     vfprintf(core::ptr::null_mut(), f, args.as_va_list())
 }
@@ -179,10 +187,29 @@ pub unsafe extern "C" fn putc(c: c_int, stream: *mut c_void) -> c_int {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn stat(path: *const c_char, buf: *mut c_void) -> c_int {
-    if let Ok(file) = std::fs::File::open(core::str::from_utf8_unchecked(core::slice::from_raw_parts(path as *const u8, strlen(path)))) {
+    let p_str = core::ffi::CStr::from_ptr(path).to_string_lossy();
+    if let Ok(file) = std::fs::File::open(&p_str) {
         let size = file.size();
+        let is_dir = std::fs::read_dir(&p_str).is_ok();
 
-        *((buf as usize + 48) as *mut u64) = size as u64;
+        let stat_ptr = buf as *mut u8;
+        // struct stat {
+        //   st_dev: 0..8
+        //   st_ino: 8..16
+        //   st_mode: 16..20 (u32)
+        //   st_nlink: 24..32 (u64)
+        //   st_uid: 32..36 (u32)
+        //   st_gid: 36..40 (u32)
+        //   st_rdev: 40..48
+        //   st_size: 48..56 (u64)
+        // }
+
+        core::ptr::write_bytes(stat_ptr, 0, 144); // Clear struct (size guess based on fields)
+
+        let mode: u32 = if is_dir { 0040000 | 0777 } else { 0100000 | 0666 };
+        *((stat_ptr.add(16)) as *mut u32) = mode;
+        *((stat_ptr.add(48)) as *mut u64) = size as u64;
+
         return 0;
     }
     -1

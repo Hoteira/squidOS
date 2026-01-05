@@ -22,6 +22,7 @@ extern int vprintf(const char *format, va_list ap);
 extern int snprintf(char *str, size_t size, const char *format, ...);
 extern int vsnprintf(char *str, size_t size, const char *format, va_list ap);
 extern int sscanf(const char *str, const char *format, ...);
+extern int krake_debug_printf(const char *format, ...);
 extern int putchar(int c);
 extern int puts(const char *s);
 extern int putc(int c, FILE *stream);

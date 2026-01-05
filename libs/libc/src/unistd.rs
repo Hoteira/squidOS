@@ -150,9 +150,9 @@ pub unsafe extern "C" fn chdir(path: *const c_char) -> c_int {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn getcwd(buf: *mut c_char, size: usize) -> *mut c_char {
-    if size > 0 && !buf.is_null() {
-        *buf = b'/' as c_char;
-        *buf.add(1) = 0;
+    let root = b"@0xE0/\0";
+    if size >= root.len() && !buf.is_null() {
+        core::ptr::copy_nonoverlapping(root.as_ptr(), buf as *mut u8, root.len());
         buf
     } else {
         core::ptr::null_mut()

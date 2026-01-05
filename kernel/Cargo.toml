@@ -8,3 +8,4 @@ edition = "2024"
 std = { path = "../std", default-features = false }
 
 elfic = { path = "../elfic" }
+log = "0.4.29"

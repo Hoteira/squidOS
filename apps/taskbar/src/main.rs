@@ -2,9 +2,9 @@
 #![no_main]
 
 extern crate alloc;
+use alloc::format;
 use inkui::{Color, Display, Size, Widget, Window};
 use std::fs::File;
-use alloc::format;
 
 fn open_start_menu(_win: &mut Window, _id: usize) {
     std::os::print("Start Menu Clicked\n");

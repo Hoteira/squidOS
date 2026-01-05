@@ -1,9 +1,9 @@
 use crate::memory::{paging, pmm};
 use core::arch::{asm, naked_asm};
 
-#[allow(dead_code)]
-const STACK_SIZE: u64 = 64 * 1024;
-pub(crate) const MAX_TASKS: usize = 125;
+pub(crate) const MAX_TASKS: usize = 128;
+const STACK_SIZE: u64 = 1024 * 1024;
+const KERNEL_STACK_SIZE: u64 = 1024 * 1024;
 
 
 #[derive(Copy, Clone, Debug)]
@@ -183,9 +183,9 @@ impl Task {
             // [u_stack_top - 128..u_stack_top] : Program Name (Strings)
             // [u_stack_top - 160..u_stack_top-128] : argv array pointers
             // [u_stack_top - 168] : argc (The entry RSP)
-            
+
             let name_len = core::cmp::min(name.len(), 63);
-            let name_addr = u_stack_top - 128; 
+            let name_addr = u_stack_top - 128;
             let name_ptr = name_addr as *mut u8;
             core::ptr::copy_nonoverlapping(name.as_ptr(), name_ptr, name_len);
             *name_ptr.add(name_len) = 0;

@@ -1,8 +1,9 @@
-use crate::{debugln, println};
 use crate::interrupts::syscalls::fs::resolve_path;
 use crate::interrupts::task::CPUState;
+use crate::debugln;
 use alloc::string::String;
 use alloc::vec::Vec;
+use log::debug;
 
 pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<u64, String> {
     let cwd_str = {
@@ -105,8 +106,6 @@ pub fn spawn_process(path: &str, fd_inheritance: Option<&[(u8, u8)]>) -> Result<
             Err(e)
         }
     }
-
-
 }
 
 pub fn handle_exit(context: &mut CPUState) {
@@ -164,7 +163,9 @@ pub fn handle_spawn(context: &mut CPUState) {
     };
 
     match spawn_process(&path_str, fd_map) {
-        Ok(pid) => context.rax = pid,
+        Ok(pid) => {
+            context.rax = pid
+        },
         Err(e) => {
             crate::debugln!("Spawn Error: {}", e);
             context.rax = u64::MAX;
