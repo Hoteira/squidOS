@@ -115,7 +115,6 @@ pub unsafe extern "C" fn vfprintf(st: *mut c_void, f: *const c_char, mut ap: VaL
     printf_core(|b| {
         let buf = [b];
         let s = core::str::from_utf8_unchecked(&buf);
-        std::os::debug_print(s);
         if st.is_null() || st == (1 as *mut c_void) || st == (2 as *mut c_void) {
             std::os::print(s);
         } else {
@@ -270,9 +269,15 @@ unsafe fn printf_core(mut output: impl FnMut(u8), fmt: *const c_char, args: &mut
             p = p.add(1);
         }
 
-        while *p >= b'0' as c_char && *p <= b'9' as c_char {
-            width = width * 10 + (*p as u8 - b'0') as usize;
+        if *p == b'*' as c_char {
+            let w = args.arg::<c_int>();
+            width = if w < 0 { 0 } else { w as usize }; // Handle negative as 0 for now (no left-align support yet)
             p = p.add(1);
+        } else {
+            while *p >= b'0' as c_char && *p <= b'9' as c_char {
+                width = width * 10 + (*p as u8 - b'0') as usize;
+                p = p.add(1);
+            }
         }
 
         if *p == b'.' as c_char {

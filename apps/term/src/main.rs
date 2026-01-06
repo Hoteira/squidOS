@@ -50,9 +50,11 @@ impl TerminalBuffer {
     }
 
     fn write_char(&mut self, c: char) {
+        /*
         if self.cursor_row < 5 && self.cursor_col < 10 {
              std::debugln!("[term] write_char('{}') at {},{}", c, self.cursor_row, self.cursor_col);
         }
+        */
         self.ensure_row();
         let current = if self.is_alt { &mut self.alt_lines } else { &mut self.lines };
         let line = &mut current[self.cursor_row];
@@ -133,12 +135,11 @@ fn update_term_size(win: &Window) {
             let width = geometry.width.saturating_sub(padding * 2);
             let height = geometry.height.saturating_sub(padding * 2);
 
-            let char_width = (text.size as f32 * 0.6) as usize;
-            let line_height = (text.size as f32 * 1.2) as usize;
+                                            let char_width = (text.size as f32 * 1.0) as usize;            let line_height = (text.size as f32 * 1.2) as usize;
 
             if char_width > 0 && line_height > 0 {
                 let cols = (width / char_width) as u16;
-                let rows = (height / line_height) as u16;
+                let rows = ((height / line_height) as u16).saturating_sub(1);
                 
                 let ws = std::os::WinSize {
                     ws_row: rows,
@@ -155,8 +156,29 @@ fn update_term_size(win: &Window) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> i32 {
-    let width = 600;
+    let width = 800;
     let height = 400;
+
+    // Manually calculate and set initial terminal size so spawned shell inherits it
+    let avail_w = width - (width * 4 / 100);
+    let avail_h = height - (height * 5 / 100);
+    let font_size = 12.0f32;
+    let char_w = (font_size * 0.8) as usize;
+    let line_h = (font_size * 1.5) as usize;
+
+    if char_w > 0 && line_h > 0 {
+        let cols = (avail_w / char_w) as u16;
+        let rows = (avail_h / line_h) as u16;
+        let rows = rows.saturating_sub(1); // Subtract 1 row to account for extra margin in scroll logic
+
+        let ws = std::os::WinSize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        std::os::ioctl(0, std::os::TIOCSWINSZ, &ws as *const _ as u64);
+    }
 
     let screen_w = std::graphics::get_screen_width();
     let screen_h = std::graphics::get_screen_height();
@@ -290,10 +312,10 @@ pub extern "C" fn main() -> i32 {
 
         let n = std::os::file_read(unsafe { TERM_READ_FD }, &mut pipe_buf);
         if n > 0 && n != usize::MAX {
-            std::debugln!("[term] Read {} bytes from pipe", n);
             let mut i = 0;
             let mut has_newline = false;
             while i < n {
+                // ... (processing loop remains unchanged) ...
                 let b = pipe_buf[i];
                 if b == 0x08 {
                     term_buffer.backspace();
@@ -423,7 +445,7 @@ pub extern "C" fn main() -> i32 {
                                                 let width = geometry.width.saturating_sub(padding * 2);
                                                 let height = geometry.height.saturating_sub(padding * 2);
 
-                                                let char_width = (text.size as f32 * 0.6) as usize;
+                                                let char_width = (text.size as f32 * 0.8) as usize;
                                                 let line_height = (text.size as f32 * 1.2) as usize;
 
                                                 if char_width > 0 && line_height > 0 {
@@ -463,100 +485,44 @@ pub extern "C" fn main() -> i32 {
                 if let inkui::widget::Widget::Label { text, geometry, .. } = widget {
                     text.text = term_buffer.render();
 
+                    if term_buffer.is_alt {
+                        geometry.scroll_offset_y = 0;
+                    } else {
+                        let padding = 10;
+                        let width = geometry.width.saturating_sub(padding * 2);
+                        let height = geometry.height.saturating_sub(padding * 2);
 
-                    let padding = 10;
-                    let width = geometry.width.saturating_sub(padding * 2);
-                    let height = geometry.height.saturating_sub(padding * 2);
+                        if width > 0 {
+                                                            let char_width = (text.size as f32 * 1.0) as usize;                            if char_width > 0 {
+                                let chars_per_line = width / char_width;
+                                let mut visual_lines = 0;
 
-                    if width > 0 {
-                        let char_width = (text.size as f32 * 0.6) as usize;
-                        if char_width > 0 {
-                            let chars_per_line = width / char_width;
-                            let mut visual_lines = 0;
-
-                            let current_lines = if term_buffer.is_alt { &term_buffer.alt_lines } else { &term_buffer.lines };
-                            for line in current_lines {
-                                let len = line.len();
-                                if len == 0 {
-                                    visual_lines += 1;
-                                } else {
-                                    visual_lines += (len + chars_per_line - 1) / chars_per_line;
+                                let current_lines = &term_buffer.lines;
+                                for line in current_lines {
+                                    let len = line.len();
+                                    if len == 0 {
+                                        visual_lines += 1;
+                                    } else {
+                                        visual_lines += (len + chars_per_line - 1) / chars_per_line;
+                                    }
                                 }
-                            }
 
+                                let line_height = (text.size as f32 * 1.2) as usize;
+                                let content_height = visual_lines * line_height;
+                                let extra_margin = line_height;
 
-                            let line_height = (text.size as f32 * 1.2) as usize;
-                            let content_height = visual_lines * line_height;
-
-
-                            let extra_margin = line_height;
-
-                            if content_height + extra_margin > height {
-                                geometry.scroll_offset_y = (content_height + extra_margin) - height;
-                            } else {
-                                geometry.scroll_offset_y = 0;
+                                if content_height + extra_margin > height {
+                                    geometry.scroll_offset_y = (content_height + extra_margin) - height;
+                                } else {
+                                    geometry.scroll_offset_y = 0;
+                                }
                             }
                         }
                     }
                 }
             }
             win.draw();
-
-
-            let mut partial_update = false;
-            let new_scroll_y = if let Some(w) = win.find_widget_by_id(2) { w.geometry().scroll_offset_y } else { 0 };
-
-            if !has_newline && old_scroll_y == new_scroll_y && old_cursor_row == term_buffer.cursor_row {
-                if let Some(widget) = win.find_widget_by_id(2) {
-                    if let inkui::widget::Widget::Label { text, geometry, .. } = widget {
-                        let line_height = (text.size as f32 * 1.2) as usize;
-                        let scroll_y = geometry.scroll_offset_y;
-
-                        let padding = 10;
-                        let width = geometry.width.saturating_sub(padding * 2);
-                        let char_width = (text.size as f32 * 0.6) as usize;
-
-                        let current_lines = if term_buffer.is_alt { &term_buffer.alt_lines } else { &term_buffer.lines };
-                        let mut prev_visual_lines = 0;
-
-                        if width > 0 && char_width > 0 {
-                            let chars_per_line = width / char_width;
-                            for (i, line) in current_lines.iter().enumerate() {
-                                if i == term_buffer.cursor_row {
-                                    break;
-                                }
-                                let len = line.len();
-                                if len == 0 { prev_visual_lines += 1; } else { prev_visual_lines += (len + chars_per_line - 1) / chars_per_line; }
-                            }
-
-                            let current_line = &current_lines[term_buffer.cursor_row];
-                            let len = current_line.len();
-                            let current_row_visual_lines = if len == 0 { 1 } else { (len + chars_per_line - 1) / chars_per_line };
-
-                            let row_y_start = prev_visual_lines * line_height;
-                            let update_height = (current_row_visual_lines + 1) * line_height;
-
-                            if row_y_start + update_height >= scroll_y {
-                                let relative_y = if row_y_start >= scroll_y {
-                                    row_y_start - scroll_y
-                                } else {
-                                    0
-                                };
-                                let screen_y = geometry.y + geometry.padding + relative_y;
-
-                                if screen_y < win.height {
-                                    win.update_area(0, screen_y, win.width, update_height + 5);
-                                    partial_update = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !partial_update {
-                win.update();
-            }
+            win.update();
         }
 
         std::os::yield_task();

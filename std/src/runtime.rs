@@ -16,22 +16,6 @@ pub unsafe extern "C" fn _start() -> ! {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_start(stack: *const usize) -> ! {
-    let argc = *stack as i32;
-    let argv = stack.add(1) as *const *const u8;
-    
-    let prog_name = if argc > 0 {
-        let ptr = *argv;
-        if !ptr.is_null() {
-            core::ffi::CStr::from_ptr(ptr as *const i8).to_str().unwrap_or("unknown")
-        } else {
-            "unknown"
-        }
-    } else {
-        "unknown"
-    };
-
-    crate::debugln!("[Runtime] Starting process: {} (argc: {})", prog_name, argc);
-
     let heap_size = 10 * 1024 * 1024; // 10 MiB
     let heap_ptr = crate::memory::malloc(heap_size);
     if heap_ptr == 0 || heap_ptr == usize::MAX {

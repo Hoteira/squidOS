@@ -38,6 +38,7 @@ pub struct WINDOW {
     pub flags: c_int,
     pub attrs: c_int,
     pub bkgd: chtype,
+    pub _delay: bool,
 }
 
 #[unsafe(no_mangle)]
@@ -49,13 +50,18 @@ pub static mut curscr: *mut WINDOW = core::ptr::null_mut();
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn initscr() -> *mut WINDOW { 
-    crate::stdio::krake_debug_printf(b"initscr() called\n\0".as_ptr() as *const c_char);
+    // crate::stdio::krake_debug_printf(b"initscr() called\n\0".as_ptr() as *const c_char);
     let mut ws = core::mem::zeroed::<crate::sys::winsize>();
-    if std::os::syscall(16, 0, 0x5413, &mut ws as *mut _ as u64) == 0 {
+    let res = std::os::syscall(16, 0, 0x5413, &mut ws as *mut _ as u64);
+    if res == 0 {
         COLS = ws.ws_col as c_int;
         LINES = ws.ws_row as c_int;
+        crate::stdio::krake_debug_printf(b"initscr: TIOCGWINSZ success, size %d x %d\n\0".as_ptr() as *const c_char, COLS, LINES);
+    } else {
+        crate::stdio::krake_debug_printf(b"initscr: TIOCGWINSZ FAILED with %d, using defaults\n\0".as_ptr() as *const c_char, res as c_int);
+        COLS = 80;
+        LINES = 25;
     }
-    crate::stdio::krake_debug_printf(b"Terminal size: %d x %d\n\0".as_ptr() as *const c_char, COLS, LINES);
     let win = newwin(LINES, COLS, 0, 0);
     stdscr = win;
     curscr = win;
@@ -67,7 +73,7 @@ pub unsafe extern "C" fn endwin() -> c_int { 0 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn newwin(nlines: c_int, ncols: c_int, begin_y: c_int, begin_x: c_int) -> *mut WINDOW {
-    crate::stdio::krake_debug_printf(b"newwin(%d, %d, %d, %d) called\n\0".as_ptr() as *const c_char, nlines, ncols, begin_y, begin_x);
+    // crate::stdio::krake_debug_printf(b"newwin(%d, %d, %d, %d) called\n\0".as_ptr() as *const c_char, nlines, ncols, begin_y, begin_x);
     let ptr = crate::stdlib::malloc(core::mem::size_of::<WINDOW>()) as *mut WINDOW;
     if !ptr.is_null() {
         (*ptr).cury = 0;
@@ -79,6 +85,7 @@ pub unsafe extern "C" fn newwin(nlines: c_int, ncols: c_int, begin_y: c_int, beg
         (*ptr).flags = 0;
         (*ptr).attrs = 0;
         (*ptr).bkgd = 0;
+        (*ptr)._delay = false;
     }
     ptr
 }
@@ -94,7 +101,7 @@ pub unsafe extern "C" fn delwin(win: *mut WINDOW) -> c_int {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wmove(win: *mut WINDOW, y: c_int, x: c_int) -> c_int {
     if win.is_null() { 
-        crate::stdio::krake_debug_printf(b"wmove(NULL, %d, %d) called!\n\0".as_ptr() as *const c_char, y, x);
+        // crate::stdio::krake_debug_printf(b"wmove(NULL, %d, %d) called!\n\0".as_ptr() as *const c_char, y, x);
         return -1; 
     }
     (*win).cury = y;
@@ -150,15 +157,21 @@ pub unsafe extern "C" fn wmove(win: *mut WINDOW, y: c_int, x: c_int) -> c_int {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wgetch(_win: *mut WINDOW) -> c_int {
+pub unsafe extern "C" fn wgetch(win: *mut WINDOW) -> c_int {
+    let non_blocking = if !win.is_null() { (*win)._delay } else { false };
+
     loop {
         let mut buf = [0u8; 1];
         let n = std::os::file_read(0, &mut buf);
         if n == 1 { 
-            crate::stdio::krake_debug_printf(b"wgetch() got: %d\n\0".as_ptr() as *const c_char, buf[0] as c_int);
+            // crate::stdio::krake_debug_printf(b"wgetch() got: %d\n\0".as_ptr() as *const c_char, buf[0] as c_int);
             return buf[0] as c_int;
         } else if n == usize::MAX {
             return -1;
+        } else if n == 0 {
+            if non_blocking {
+                return -1; // ERR
+            }
         }
         std::os::yield_task();
     }
@@ -181,7 +194,7 @@ pub unsafe extern "C" fn wredrawln(_win: *mut WINDOW, _beg: c_int, _num: c_int) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn werase(win: *mut WINDOW) -> c_int {
     if win.is_null() { return -1; }
-    crate::stdio::krake_debug_printf(b"werase(window at %d,%d, size %dx%d) called\n\0".as_ptr() as *const c_char, (*win).begx, (*win).begy, (*win).maxx, (*win).maxy);
+    // crate::stdio::krake_debug_printf(b"werase(window at %d,%d, size %dx%d) called\n\0".as_ptr() as *const c_char, (*win).begx, (*win).begy, (*win).maxx, (*win).maxy);
     
     let spaces = b"                                                                                                                                "; // 128 spaces
     
@@ -230,17 +243,19 @@ pub unsafe extern "C" fn waddch(win: *mut WINDOW, ch: u32) -> c_int {
     let char_code = ch & 0xFF; 
     if char_code == 0 { return 0; }
     if let Some(c) = char::from_u32(char_code) {
+        /*
         if WADDCH_COUNT < 100 {
             crate::stdio::krake_debug_printf(b"waddch('%c')\n\0".as_ptr() as *const c_char, char_code);
             WADDCH_COUNT += 1;
         }
+        */
         let s = c.encode_utf8(&mut buf);
         std::os::print(s);
         if !win.is_null() {
             (*win).curx += 1; // Basic tracking
         }
     } else {
-        crate::stdio::krake_debug_printf(b"waddch invalid char: %u\n\0".as_ptr() as *const c_char, ch);
+        // crate::stdio::krake_debug_printf(b"waddch invalid char: %u\n\0".as_ptr() as *const c_char, ch);
     }
     0
 }
@@ -338,7 +353,12 @@ pub unsafe extern "C" fn intrflush(_win: *mut WINDOW, _bf: bool) -> c_int { 0 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keypad(_win: *mut WINDOW, _bf: bool) -> c_int { 0 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nodelay(_win: *mut WINDOW, _bf: bool) -> c_int { 0 }
+pub unsafe extern "C" fn nodelay(win: *mut WINDOW, bf: bool) -> c_int {
+    if !win.is_null() {
+        (*win)._delay = bf;
+    }
+    0
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn cbreak() -> c_int { 0 }
 #[unsafe(no_mangle)]

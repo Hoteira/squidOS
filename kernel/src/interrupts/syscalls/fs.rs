@@ -615,6 +615,10 @@ pub fn handle_read_dir(context: &mut CPUState) {
             use crate::fs::vfs::FileHandle;
             match handle {
                 FileHandle::File { node, offset } => {
+                    if node.kind() != crate::fs::vfs::FileType::Directory {
+                        context.rax = u64::MAX;
+                        return;
+                    }
                     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
                     match node.read_dir(*offset, buf) {
                         Ok((bytes_written, count_read)) => {
@@ -829,6 +833,7 @@ pub fn handle_ioctl(context: &mut CPUState) {
                         (*arg).ws_xpixel = 0;
                         (*arg).ws_ypixel = 0;
                     }
+                    crate::debugln!("[IOCTL] TIOCGWINSZ: Returning {}x{} to PID {}", task.terminal_width, task.terminal_height, tm.current_task);
                     context.rax = 0;
                 } else {
                     context.rax = u64::MAX;
@@ -847,6 +852,7 @@ pub fn handle_ioctl(context: &mut CPUState) {
                         task.terminal_height = (*arg).ws_row;
                         task.terminal_width = (*arg).ws_col;
                     }
+                    crate::debugln!("[IOCTL] TIOCSWINSZ: Set to {}x{} by PID {}", task.terminal_width, task.terminal_height, current);
                     context.rax = 0;
                 } else {
                     context.rax = u64::MAX;
