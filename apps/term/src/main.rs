@@ -1,270 +1,22 @@
 #![no_std]
 #![no_main]
 
+mod types;
+mod buffer;
+
 extern crate alloc;
 use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use inkui::{Color, Size, Widget, Window};
-use std::{debugln, print};
 use std::fs::File;
+
+use crate::types::{TermAction, Cell};
+use crate::buffer::TerminalBuffer;
 
 static mut TERM_READ_FD: usize = 0;
 static mut TERM_WRITE_FD: usize = 0;
-
-enum TermAction {
-    Backspace,
-    CarriageReturn,
-    Newline,
-    Csi(u8, String),
-    Text(String),
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct Cell {
-    c: char,
-    fg: u8,   // 0-255, 255 = Default
-    bg: u8,   // 0-255, 255 = Default
-    bold: bool,
-}
-
-impl Cell {
-    fn default() -> Self {
-        Self { c: ' ', fg: 255, bg: 255, bold: false }
-    }
-}
-
-struct TerminalBuffer {
-    lines: Vec<Vec<Cell>>,
-    alt_lines: Vec<Vec<Cell>>,
-    is_alt: bool,
-    cursor_row: usize,
-    cursor_col: usize,
-    cursor_visible: bool,
-
-    // Current SGR state
-    current_fg: u8,
-    current_bg: u8,
-    current_bold: bool,
-
-    // Partial input buffer
-    input_buffer: Vec<u8>,
-}
-
-impl TerminalBuffer {
-    fn new() -> Self {
-        Self {
-            lines: Vec::new(),
-            alt_lines: Vec::new(),
-            is_alt: false,
-            cursor_row: 0,
-            cursor_col: 0,
-            cursor_visible: true,
-            current_fg: 255,
-            current_bg: 255,
-            current_bold: false,
-            input_buffer: Vec::new(),
-        }
-    }
-
-    fn clear(&mut self) {
-        if self.is_alt {
-            self.alt_lines.clear();
-        } else {
-            self.lines.clear();
-        }
-        self.cursor_row = 0;
-        self.cursor_col = 0;
-    }
-
-    fn ensure_row(&mut self) {
-        let current = if self.is_alt { &mut self.alt_lines } else { &mut self.lines };
-        while current.len() <= self.cursor_row {
-            current.push(Vec::new());
-        }
-    }
-
-    fn write_char(&mut self, c: char) {
-        self.ensure_row();
-        let current = if self.is_alt { &mut self.alt_lines } else { &mut self.lines };
-        let line = &mut current[self.cursor_row];
-        
-        while line.len() <= self.cursor_col {
-            line.push(Cell::default());
-        }
-        
-        let cell = Cell {
-            c,
-            fg: self.current_fg,
-            bg: self.current_bg,
-            bold: self.current_bold,
-        };
-
-        if self.cursor_col < line.len() {
-            line[self.cursor_col] = cell;
-        } else {
-            line.push(cell);
-        }
-        self.cursor_col += 1;
-    }
-
-    fn write_str(&mut self, s: &str) {
-        for c in s.chars() {
-            if c == '\x1B' { continue; }
-            self.write_char(c);
-        }
-    }
-
-    fn newline(&mut self) {
-        self.cursor_row += 1;
-        self.cursor_col = 0;
-    }
-
-    fn backspace(&mut self) {
-        if self.cursor_col > 0 {
-            self.cursor_col -= 1;
-        }
-    }
-
-    fn clear_line(&mut self) {
-        let current = if self.is_alt { &mut self.alt_lines } else { &mut self.lines };
-        if self.cursor_row < current.len() {
-            current[self.cursor_row].truncate(self.cursor_col);
-        }
-    }
-
-    fn handle_sgr(&mut self, params: &str) {
-        if params.is_empty() {
-            self.current_fg = 255;
-            self.current_bg = 255;
-            self.current_bold = false;
-            return;
-        }
-
-        let parts = params.split(';');
-        for part in parts {
-            let n = part.parse::<u8>().unwrap_or(0);
-            match n {
-                0 => { self.current_fg = 255; self.current_bg = 255; self.current_bold = false; }
-                1 => self.current_bold = true,
-                22 => self.current_bold = false,
-                30..=37 => self.current_fg = n - 30,
-                39 => self.current_fg = 255,
-                40..=47 => self.current_bg = n - 40,
-                49 => self.current_bg = 255,
-                90..=97 => self.current_fg = n - 90 + 8,
-                100..=107 => self.current_bg = n - 100 + 8,
-                _ => {} // Ignore unsupported for now
-            }
-        }
-    }
-
-    fn render(&self) -> String {
-        let current = if self.is_alt { &self.alt_lines } else { &self.lines };
-        let mut s = String::new();
-        
-        let mut last_fg = 255;
-        let mut last_bg = 255;
-        let mut last_bold = false;
-
-        // Reset at start
-        s.push_str("\x1B[0m");
-
-        // Determine effective height (max of lines.len() and cursor_row + 1)
-        let max_row = current.len().max(if self.cursor_visible { self.cursor_row + 1 } else { 0 });
-
-        for i in 0..max_row {
-            if i > 0 { 
-                s.push('\n'); 
-            }
-            
-            // Get line if exists, else empty slice
-            let empty_line = Vec::new();
-            let line = if i < current.len() { &current[i] } else { &empty_line };
-
-            // Determine effective width for this line
-            // If this is cursor row, extend to cursor_col
-            let line_len = line.len();
-            let mut max_col = line_len;
-            if self.cursor_visible && i == self.cursor_row {
-                max_col = max_col.max(self.cursor_col + 1);
-            }
-
-            for j in 0..max_col {
-                // Determine cell to render
-                let mut cell = if j < line_len { line[j] } else { Cell::default() };
-                
-                // Override if cursor
-                if self.cursor_visible && i == self.cursor_row && j == self.cursor_col {
-                    // User requested 3/4 high upward and 1/4 under the baseline.
-                    // U+2588: █
-                    cell.c = '█';
-                }
-
-                // Update Bold
-                if cell.bold != last_bold {
-                    if cell.bold {
-                        s.push_str("\x1B[1m");
-                    } else {
-                        s.push_str("\x1B[22m"); // Normal intensity
-                    }
-                    last_bold = cell.bold;
-                }
-
-                // Update FG
-                if cell.fg != last_fg {
-                    if cell.fg == 255 {
-                        s.push_str("\x1B[39m");
-                    } else if cell.fg < 8 {
-                        s.push_str("\x1B[");
-                        s.push_str(&(30 + cell.fg).to_string());
-                        s.push('m');
-                    } else if cell.fg < 16 {
-                        s.push_str("\x1B[");
-                        s.push_str(&(90 + cell.fg - 8).to_string());
-                        s.push('m');
-                    }
-                    last_fg = cell.fg;
-                }
-
-                // Update BG
-                if cell.bg != last_bg {
-                    if cell.bg == 255 {
-                        s.push_str("\x1B[49m");
-                    } else if cell.bg < 8 {
-                        s.push_str("\x1B[");
-                        s.push_str(&(40 + cell.bg).to_string());
-                        s.push('m');
-                    } else if cell.bg < 16 {
-                        s.push_str("\x1B[");
-                        s.push_str(&(100 + cell.bg - 8).to_string());
-                        s.push('m');
-                    }
-                    last_bg = cell.bg;
-                }
-
-                s.push(cell.c);
-            }
-        }
-        s
-    }
-
-    fn switch_screen(&mut self, alt: bool) {
-        if self.is_alt != alt {
-            std::debugln!("[term] Switching to {} screen", if alt { "alternate" } else { "main" });
-            self.is_alt = alt;
-            if self.is_alt {
-                self.alt_lines.clear();
-                self.cursor_row = 0;
-                self.cursor_col = 0;
-            } else {
-                self.cursor_row = self.lines.len().saturating_sub(1);
-                self.cursor_col = 0;
-            }
-        }
-    }
-}
 
 fn update_term_size(win: &Window) {
     if let Some(widget) = win.find_widget_by_id(2) {
@@ -309,7 +61,7 @@ pub extern "C" fn main() -> i32 {
     if char_w > 0 && line_h > 0 {
         let cols = (avail_w / char_w as f32) as u16;
         let rows = (avail_h / line_h as f32) as u16;
-        let rows = rows.saturating_sub(2); // Subtract 1 row safety margin
+        let rows = rows.saturating_sub(2); // Subtract rows safety margin
 
         let ws = std::os::WinSize {
             ws_row: rows,
@@ -442,12 +194,6 @@ pub extern "C" fn main() -> i32 {
                 }
                 _ => {}
             }
-        }
-
-        let old_cursor_row = term_buffer.cursor_row;
-        let mut old_scroll_y = 0;
-        if let Some(w) = win.find_widget_by_id(2) {
-            old_scroll_y = w.geometry().scroll_offset_y;
         }
 
         let n = std::os::file_read(unsafe { TERM_READ_FD }, &mut pipe_buf);
