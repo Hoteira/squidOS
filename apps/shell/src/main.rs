@@ -368,7 +368,7 @@ fn execute_builtin(cmd: &str, args: &[String], cwd: &mut String, path_env: &mut 
         let m = (total_seconds % 3600) / 60;
         let s = total_seconds % 60;
 
-        let info = [
+        let mut info = [
             format!("{}guest{}@{}krakeos{}", p_pink, white, p_blue, reset),
             format!("{}-----------------{}", gray, reset),
             format!("{} \u{E8F0} OS: {}KrakeOS{}", p_cyan, white, reset),
@@ -384,6 +384,21 @@ fn execute_builtin(cmd: &str, args: &[String], cwd: &mut String, path_env: &mut 
             String::from(""),
             String::from(""),
         ];
+
+        // Add color squares to the end of info
+        let mut palette1 = String::new();
+        for i in 0..8 {
+            palette1.push_str(&format!("\x1B[{}m  ", 40 + i));
+        }
+        palette1.push_str(reset);
+        info[10] = palette1;
+
+        let mut palette2 = String::new();
+        for i in 0..8 {
+            palette2.push_str(&format!("\x1B[{}m  ", 100 + i));
+        }
+        palette2.push_str(reset);
+        info[11] = palette2;
 
         let ascii_width = 40;
 

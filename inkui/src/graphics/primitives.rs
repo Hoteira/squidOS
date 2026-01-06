@@ -393,7 +393,9 @@ fn parse_ansi_text(text: &str, default_color: Color, default_size: f32) -> (Vec<
 
             if is_inverse {
                 let tmp = eff_fg;
-                eff_fg = if eff_bg.a == 0 { default_color } else { eff_bg };
+                // If background was transparent, default to black for foreground when inversed
+                // to avoid white-on-white text if default_color is white.
+                eff_fg = if eff_bg.a == 0 { Color::rgb(0, 0, 0) } else { eff_bg };
                 eff_bg = tmp;
                 eff_bg.a = 255; 
             }
@@ -496,23 +498,18 @@ pub fn draw_text_formatted(
 
         // Draw Background if opaque
         if segment.bg_color.a > 0 {
-            // Calculate background rect for this char. 
-            // We use advance_width for width, and current_line_height for height.
-            // Centered vertically around the text? Or fill the line?
-            // Usually terminal emulators fill the line height.
-            // Here we approximate using font metrics.
-            
             let bg_x = current_x;
             let bg_w = metrics.advance_width;
-            let bg_y_isize = current_baseline_isize; // Top of line approx? 
-            // current_baseline_isize is the TOP of the line in this layout logic (see start_y_isize initialization)
-            
-            let bg_h = current_line_height;
+            // Approximate the line height and vertical position. 
+            // current_baseline_isize is the Y coordinate of the baseline.
+            // We want the box to cover from slightly above the cap-height to slightly below the baseline.
+            let bg_y_isize = current_baseline_isize - (segment.size * 0.8) as isize; 
+            let bg_h = (segment.size * 1.2) as usize;
             
             // Draw rectangle
             if bg_y_isize + (bg_h as isize) >= clip_y as isize && bg_y_isize <= limit_y as isize {
                  for r in 0..bg_h {
-                     let dy = (bg_y_isize + r as isize);
+                     let dy = bg_y_isize + r as isize;
                      if dy < clip_y as isize { continue; }
                      let udy = dy as usize;
                      if max_height > 0 && udy >= clip_y + max_height { break; }
