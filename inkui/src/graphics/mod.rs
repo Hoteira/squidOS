@@ -18,9 +18,13 @@ pub fn draw_pixel(buffer: &mut [u32], width: usize, x: usize, y: usize, color: C
             let alpha = color.a as u32;
             let inv_alpha = 255 - alpha;
 
-            let r = ((color.r as u32 * alpha) + (prev.r as u32 * inv_alpha)) / 255;
-            let g = ((color.g as u32 * alpha) + (prev.g as u32 * inv_alpha)) / 255;
-            let b = ((color.b as u32 * alpha) + (prev.b as u32 * inv_alpha)) / 255;
+            let r_mul = (color.r as u32 * alpha) + (prev.r as u32 * inv_alpha);
+            let g_mul = (color.g as u32 * alpha) + (prev.g as u32 * inv_alpha);
+            let b_mul = (color.b as u32 * alpha) + (prev.b as u32 * inv_alpha);
+
+            let r = (r_mul + 1 + (r_mul >> 8)) >> 8;
+            let g = (g_mul + 1 + (g_mul >> 8)) >> 8;
+            let b = (b_mul + 1 + (b_mul >> 8)) >> 8;
 
 
             let a = (alpha + prev.a as u32).min(255);

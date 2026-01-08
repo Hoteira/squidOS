@@ -41,17 +41,26 @@ impl DisplayServer {
         let boot_info = unsafe { crate::boot::BOOT_INFO };
         let vbe = boot_info.mode;
 
+        self.width = vbe.width as u64;
+        self.height = vbe.height as u64;
+
         unsafe {
             virtio::init();
             if virtio::queue::VIRT_QUEUES[0].is_some() {
                 if let Some((w, h)) = virtio::get_display_info() {
                     self.width = w as u64;
                     self.height = h as u64;
-                    debugln!("DisplayServer: Detected resolution {}x{}", w, h);
+                    
+                    if self.width == 1280 && vbe.width != 1280 && vbe.width != 0 {
+                        self.width = vbe.width as u64;
+                        self.height = vbe.height as u64;
+                        self.pitch = self.width * 4;
+                        debugln!("DisplayServer: VirtIO reported 1280 but VBE says {}, trusting VBE", self.width);
+                    }
+                    
+                    debugln!("DisplayServer: Detected resolution {}x{}", self.width, self.height);
                 } else {
-                    self.width = 1280;
-                    self.height = 720;
-                    debugln!("DisplayServer: Could not detect resolution, defaulting to 1280x720");
+                    debugln!("DisplayServer: Could not detect resolution, defaulting to {}x{} from VBE", self.width, self.height);
                 }
 
                 self.pitch = self.width * 4;
@@ -155,6 +164,13 @@ impl DisplayServer {
 
                 self.framebuffer = next_buffer_virt;
                 self.double_buffer = current_buffer_virt;
+
+                let size_bytes = (self.pitch * self.height) as usize;
+                core::ptr::copy_nonoverlapping(
+                    self.framebuffer as *const u8,
+                    self.double_buffer as *mut u8,
+                    size_bytes,
+                );
             } else {
                 let buffer_size = self.pitch as u64 * self.height as u64;
                 core::ptr::copy(

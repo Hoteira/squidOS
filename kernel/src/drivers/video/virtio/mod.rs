@@ -204,18 +204,18 @@ pub fn get_display_info() -> Option<(u32, u32)> {
 
         let resp = &*resp_ptr;
         if resp.hdr.type_ == VIRTIO_GPU_RESP_OK_DISPLAY_INFO {
-            for i in 0..16 {
+            let pmode = resp.pmodes[0];
+            if pmode.r.width > 0 && pmode.r.height > 0 {
+                return Some((pmode.r.width, pmode.r.height));
+            }
+
+            for i in 1..16 {
                 let pmode = resp.pmodes[i];
                 if pmode.enabled != 0 {
                     if pmode.r.width > 0 && pmode.r.height > 0 {
                         return Some((pmode.r.width, pmode.r.height));
                     }
                 }
-            }
-            
-            let pmode = resp.pmodes[0];
-            if pmode.r.width > 0 && pmode.r.height > 0 {
-                return Some((pmode.r.width, pmode.r.height));
             }
         }
     }
