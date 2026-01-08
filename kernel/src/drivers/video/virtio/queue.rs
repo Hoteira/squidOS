@@ -40,7 +40,7 @@ pub fn setup_queue(common_cfg: *mut u8, index: u16, notify_base: u64, notify_mul
             
             let desc_addr = frame;
             let avail_addr = desc_addr + 2048;
-            let used_addr = desc_addr + 3072;
+            let used_addr = (avail_addr + 262 + 3) & !3;
 
             let avail_ptr = (avail_addr + crate::memory::paging::HHDM_OFFSET) as *mut VirtqAvail;
             (*avail_ptr).flags = 1; 
