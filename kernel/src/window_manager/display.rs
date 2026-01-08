@@ -861,14 +861,9 @@ impl DisplayServer {
     }
 
     pub fn present_rect(&self, x: i32, y: i32, w: u32, h: u32) {
-        
-        
-        
-        
-        let sx = 0; 
-        let sw = self.width as u32;
-        
+        let sx = x.max(0) as u32;
         let sy = y.max(0) as u32;
+        let sw = w.min((self.width as u32).saturating_sub(sx));
         let sh = h.min((self.height as u32).saturating_sub(sy));
 
         if sw == 0 || sh == 0 { return; }
@@ -881,20 +876,23 @@ impl DisplayServer {
                 let dst = self.framebuffer as *mut u8;
                 let fb_len = (self.pitch * self.height) as usize;
 
-                
-                for row in 0..sh {
-                    
-                    let offset = (sy + row) as usize * pitch;
-                    
-                    
-                    let size = pitch;
-
+                if sx == 0 && sw == self.width as u32 {
+                    let offset = sy as usize * pitch;
+                    let size = sh as usize * pitch;
                     if offset + size <= fb_len {
                         core::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), size);
                     }
+                } else {
+                    for row in 0..sh {
+                        let offset = (sy + row) as usize * pitch + sx as usize * bpp;
+                        let end_offset = offset + (sw * bpp as u32) as usize;
+
+                        if end_offset <= fb_len {
+                            core::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), (sw * bpp as u32) as usize);
+                        }
+                    }
                 }
 
-                
                 let mx = crate::window_manager::input::MOUSE.x;
                 let my = crate::window_manager::input::MOUSE.y;
                 use crate::drivers::periferics::mouse::{CURSOR_HEIGHT, CURSOR_WIDTH};
@@ -902,23 +900,17 @@ impl DisplayServer {
                 let mw = CURSOR_WIDTH as u32;
                 let mh = CURSOR_HEIGHT as u32;
 
-                
+                let overlap_x = (mx as u32) < (sx + sw) && (mx as u32 + mw) > sx;
                 let overlap_y = (my as u32) < (sy + sh) && (my as u32 + mh) > sy;
 
-                if overlap_y {
+                if overlap_x && overlap_y {
                     self.draw_mouse(mx, my, false);
                 }
 
-                
                 virtio::flush(sx, sy, sw, sh, self.width as u32, self.active_resource_id);
-
-                
-                
-                
             } else {
                 self.copy_to_fb(x, y, w, h);
 
-                
                 let mx = crate::window_manager::input::MOUSE.x;
                 let my = crate::window_manager::input::MOUSE.y;
                 use crate::drivers::periferics::mouse::{CURSOR_HEIGHT, CURSOR_WIDTH};
