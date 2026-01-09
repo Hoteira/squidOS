@@ -7,6 +7,14 @@ use std::io::{Read, Write};
 use alloc::ffi::CString;
 use alloc::string::String;
 
+fn sanitize_buffer(buf: &mut [u8]) {
+    for b in buf.iter_mut() {
+        if *b == 0x1B {
+            *b = b'.';
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
     let mut buf = [0u8; 4096];
@@ -16,6 +24,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
         loop {
             let n = std::os::file_read(0, &mut buf);
             if n == 0 || n == usize::MAX { break; }
+            sanitize_buffer(&mut buf[0..n]);
             std::os::file_write(1, &buf[0..n]);
         }
     } else {
@@ -30,6 +39,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
                 loop {
                     let n = std::os::file_read(0, &mut buf);
                     if n == 0 || n == usize::MAX { break; }
+                    sanitize_buffer(&mut buf[0..n]);
                     std::os::file_write(1, &buf[0..n]);
                 }
                 continue;
@@ -41,6 +51,7 @@ pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
                         match file.read(&mut buf) {
                             Ok(0) => break,
                             Ok(n) => {
+                                sanitize_buffer(&mut buf[0..n]);
                                 std::os::file_write(1, &buf[0..n]);
                             }
                             Err(_) => break,

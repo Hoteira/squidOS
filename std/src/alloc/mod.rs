@@ -125,34 +125,48 @@ unsafe fn grow_heap(min_size: usize) -> bool {
 
     #[cfg(feature = "userland")]
     {
-        let mut size = 4096 * 1024; 
+        let mut size = 4096 * 1024; // Default 4MB chunks
         if min_size > size {
             size = min_size.next_power_of_two();
         }
 
-        if HEAP_REGION_COUNT >= MAX_HEAP_REGIONS {
+        // Get current break
+        let current_brk = crate::os::brk(0);
+        if current_brk == 0 {
             return false;
         }
 
-        
-        
-        let ptr = crate::os::syscall6(9, 0, size as u64, 0, 0, 0, 0) as *mut u8;
-        
-        if ptr as u64 == u64::MAX || ptr.is_null() {
-            return false;
+        // Align requested size to page boundary (4096)
+        let new_brk_req = align_up(current_brk + size, 4096);
+        let aligned_size = new_brk_req - current_brk;
+
+        // Request extension
+        let new_brk = crate::os::brk(new_brk_req);
+
+        if new_brk < new_brk_req {
+            return false; 
         }
 
-        
-        write_bytes(ptr, 0, size);
+        let start = current_brk;
+        let end = new_brk;
+        let ptr = start as *mut u8;
 
-        let start = ptr as usize;
-        let end = start + size;
+        // Initialize memory (brk usually returns zeroed pages, but safe to be sure)
+        write_bytes(ptr, 0, aligned_size);
 
-        HEAP_REGIONS[HEAP_REGION_COUNT] = HeapRegion { start, end };
-        HEAP_REGION_COUNT += 1;
+        // Check if we can merge with the last region
+        if HEAP_REGION_COUNT > 0 && HEAP_REGIONS[HEAP_REGION_COUNT - 1].end == start {
+            HEAP_REGIONS[HEAP_REGION_COUNT - 1].end = end;
+        } else {
+            if HEAP_REGION_COUNT >= MAX_HEAP_REGIONS {
+                return false;
+            }
+            HEAP_REGIONS[HEAP_REGION_COUNT] = HeapRegion { start, end };
+            HEAP_REGION_COUNT += 1;
+        }
 
         let seg = ptr as *mut Free;
-        (*seg).size = size - size_of::<Free>();
+        (*seg).size = aligned_size - size_of::<Free>();
 
         (*seg).next = ALLOCATOR.first_free.load(Ordering::Relaxed);
         ALLOCATOR.first_free.store(seg, Ordering::Relaxed);
