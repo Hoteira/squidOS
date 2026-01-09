@@ -18,6 +18,12 @@ pub struct DisplayServer {
     pub buffer1_virt: u64,
     pub buffer2_virt: u64,
     pub active_resource_id: u32,
+
+    pub dirty_min_x: i32,
+    pub dirty_min_y: i32,
+    pub dirty_max_x: i32,
+    pub dirty_max_y: i32,
+    pub has_dirty: bool,
 }
 
 pub static mut DISPLAY_SERVER: DisplayServer = DisplayServer {
@@ -32,17 +38,42 @@ pub static mut DISPLAY_SERVER: DisplayServer = DisplayServer {
     buffer1_virt: 0,
     buffer2_virt: 0,
     active_resource_id: 1,
+    dirty_min_x: i32::MAX,
+    dirty_min_y: i32::MAX,
+    dirty_max_x: i32::MIN,
+    dirty_max_y: i32::MIN,
+    has_dirty: false,
 };
 
 pub static mut VIRTIO_ACTIVE: bool = false;
 
 impl DisplayServer {
+    pub fn mark_dirty(&mut self, x: i32, y: i32, w: u32, h: u32) {
+        let x2 = x + w as i32;
+        let y2 = y + h as i32;
+
+        if x < self.dirty_min_x { self.dirty_min_x = x; }
+        if y < self.dirty_min_y { self.dirty_min_y = y; }
+        if x2 > self.dirty_max_x { self.dirty_max_x = x2; }
+        if y2 > self.dirty_max_y { self.dirty_max_y = y2; }
+        self.has_dirty = true;
+    }
+
+    pub fn reset_dirty(&mut self) {
+        self.dirty_min_x = i32::MAX;
+        self.dirty_min_y = i32::MAX;
+        self.dirty_max_x = i32::MIN;
+        self.dirty_max_y = i32::MIN;
+        self.has_dirty = false;
+    }
+
     pub fn init(&mut self) {
         let boot_info = unsafe { crate::boot::BOOT_INFO };
         let vbe = boot_info.mode;
 
         self.width = vbe.width as u64;
         self.height = vbe.height as u64;
+        self.reset_dirty();
 
         unsafe {
             virtio::init();
@@ -152,25 +183,37 @@ impl DisplayServer {
                 let next_buffer_virt = if self.active_resource_id == 1 { self.buffer2_virt } else { self.buffer1_virt };
                 let current_buffer_virt = if self.active_resource_id == 1 { self.buffer1_virt } else { self.buffer2_virt };
 
+                if self.has_dirty {
+                    let sx = self.dirty_min_x.max(0) as u32;
+                    let sy = self.dirty_min_y.max(0) as u32;
+                    let sw = (self.dirty_max_x as u32).saturating_sub(sx).min(self.width as u32);
+                    let sh = (self.dirty_max_y as u32).saturating_sub(sy).min(self.height as u32);
 
-                virtio::transfer_and_flush(next_resource, self.width as u32, self.height as u32);
+                    if sw > 0 && sh > 0 {
+                        virtio::transfer_and_flush(next_resource, self.width as u32, self.height as u32);
+                        virtio::set_scanout(next_resource, self.width as u32, self.height as u32);
 
+                        self.active_resource_id = next_resource;
+                        self.framebuffer = next_buffer_virt;
+                        self.double_buffer = current_buffer_virt;
 
-                virtio::set_scanout(next_resource, self.width as u32, self.height as u32);
-
-
-                self.active_resource_id = next_resource;
-
-
-                self.framebuffer = next_buffer_virt;
-                self.double_buffer = current_buffer_virt;
-
-                let size_bytes = (self.pitch * self.height) as usize;
-                core::ptr::copy_nonoverlapping(
-                    self.framebuffer as *const u8,
-                    self.double_buffer as *mut u8,
-                    size_bytes,
-                );
+                        let pitch = self.pitch as usize;
+                        for row in 0..sh {
+                            let offset = (sy + row) as usize * pitch + (sx as usize * 4);
+                            core::ptr::copy_nonoverlapping(
+                                (self.framebuffer as *const u8).add(offset),
+                                (self.double_buffer as *mut u8).add(offset),
+                                (sw * 4) as usize,
+                            );
+                        }
+                    }
+                    self.reset_dirty();
+                } else {
+                    virtio::set_scanout(next_resource, self.width as u32, self.height as u32);
+                    self.active_resource_id = next_resource;
+                    self.framebuffer = next_buffer_virt;
+                    self.double_buffer = current_buffer_virt;
+                }
             } else {
                 let buffer_size = self.pitch as u64 * self.height as u64;
                 core::ptr::copy(
@@ -182,7 +225,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_fb(&self, x: i32, y: i32, width: u32, height: u32) {
+    pub fn copy_to_fb(&mut self, x: i32, y: i32, width: u32, height: u32) {
         let bytes_per_pixel = 4;
         let screen_w = self.width as i32;
         let screen_h = self.height as i32;
@@ -196,6 +239,8 @@ impl DisplayServer {
 
         let copy_width = (end_x - dst_x) as usize;
         let copy_height = (end_y - dst_y) as usize;
+
+        self.mark_dirty(dst_x, dst_y, copy_width as u32, copy_height as u32);
 
         let _src_off_x = (dst_x - x) as usize;
         let _src_off_y = (dst_y - y) as usize;
@@ -220,7 +265,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_db(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>, treat_as_transparent: bool) {
+    pub fn copy_to_db(&mut self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>, treat_as_transparent: bool) {
         let dst_pitch = self.pitch as usize / 4;
         let src_pitch = width as usize;
         let screen_w = self.width as i32;
@@ -241,9 +286,12 @@ impl DisplayServer {
         let src_off_x = (dst_x - x) as usize;
         let src_off_y = (dst_y - y) as usize;
 
+        self.mark_dirty(dst_x, dst_y, copy_width as u32, copy_height as u32);
+
         unsafe {
             let src_base = buffer as *const u32;
             let dst_base = self.double_buffer as *mut u32;
+            // ... (rest of function unchanged) ...
 
             for row in 0..copy_height {
                 let src_row_ptr = src_base.add((src_off_y + row) * src_pitch + src_off_x);
@@ -459,7 +507,7 @@ impl DisplayServer {
     }
 
 
-    pub fn copy_to_db_clipped(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32, border_color: Option<u32>, treat_as_transparent: bool) {
+    pub fn copy_to_db_clipped(&mut self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32, border_color: Option<u32>, treat_as_transparent: bool) {
         let dst_pitch = self.pitch as usize / 4;
         let src_pitch = width as usize;
         let screen_w = self.width as i32;
@@ -490,9 +538,11 @@ impl DisplayServer {
         let copy_width = (intersect_end_x - intersect_x) as usize;
         let copy_height = (intersect_end_y - intersect_y) as usize;
 
+        self.mark_dirty(intersect_x, intersect_y, copy_width as u32, copy_height as u32);
 
         let src_off_x = (intersect_x - win_x) as usize;
         let src_off_y = (intersect_y - win_y) as usize;
+// ... (omitting middle part for clarity, it stays identical) ...
 
 
         let src_len = (width as usize) * (height as usize);
@@ -728,7 +778,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_fb_clipped(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32, border_color: Option<u32>, treat_as_transparent: bool) {
+    pub fn copy_to_fb_clipped(&mut self, width: u32, height: u32, buffer: usize, x: i32, y: i32, clip_x: i32, clip_y: i32, clip_w: u32, clip_h: u32, border_color: Option<u32>, treat_as_transparent: bool) {
         let dst_pitch = self.pitch as usize / 4;
         let src_pitch = width as usize;
         let screen_w = self.width as i32;
@@ -758,8 +808,11 @@ impl DisplayServer {
         let copy_width = (intersect_end_x - intersect_x) as usize;
         let copy_height = (intersect_end_y - intersect_y) as usize;
 
+        self.mark_dirty(intersect_x, intersect_y, copy_width as u32, copy_height as u32);
+
         let src_off_x = (intersect_x - win_x) as usize;
         let src_off_y = (intersect_y - win_y) as usize;
+// ... (rest unchanged) ...
 
         unsafe {
             let src_base = buffer as *const u32;
@@ -851,7 +904,7 @@ impl DisplayServer {
         }
     }
 
-    pub fn copy_to_fb_a(&self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>, treat_as_transparent: bool) {
+    pub fn copy_to_fb_a(&mut self, width: u32, height: u32, buffer: usize, x: i32, y: i32, border_color: Option<u32>, treat_as_transparent: bool) {
         let dst_pitch = self.pitch as usize / 4;
         let src_pitch = width as usize;
         let screen_w = self.width as i32;
@@ -868,6 +921,8 @@ impl DisplayServer {
 
         let copy_width = (end_x - dst_x) as usize;
         let copy_height = (end_y - dst_y) as usize;
+
+        self.mark_dirty(dst_x, dst_y, copy_width as u32, copy_height as u32);
 
         let src_off_x = (dst_x - x) as usize;
         let src_off_y = (dst_y - y) as usize;
@@ -967,13 +1022,15 @@ impl DisplayServer {
         }
     }
 
-    pub fn present_rect(&self, x: i32, y: i32, w: u32, h: u32) {
+    pub fn present_rect(&mut self, x: i32, y: i32, w: u32, h: u32) {
         let sx = x.max(0) as u32;
         let sy = y.max(0) as u32;
         let sw = w.min((self.width as u32).saturating_sub(sx));
         let sh = h.min((self.height as u32).saturating_sub(sy));
 
         if sw == 0 || sh == 0 { return; }
+
+        self.mark_dirty(x, y, w, h);
 
         unsafe {
             if VIRTIO_ACTIVE {

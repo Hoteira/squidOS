@@ -31,7 +31,8 @@ impl Composer {
                 match self.windows[i].w_type {
                     Items::Null => {}
                     _ => unsafe {
-                        (*(&raw mut DISPLAY_SERVER)).copy_to_db(
+                        let ds = &mut *(&raw mut DISPLAY_SERVER);
+                        ds.copy_to_db(
                             self.windows[i].width as u32,
                             self.windows[i].height as u32,
                             self.windows[i].buffer,
@@ -64,7 +65,8 @@ impl Composer {
                 match self.windows[i].w_type {
                     Items::Null => {}
                     _ => unsafe {
-                        (*(&raw mut DISPLAY_SERVER)).copy_to_fb_a(
+                        let ds = &mut *(&raw mut DISPLAY_SERVER);
+                        ds.copy_to_fb_a(
                             self.windows[i].width as u32,
                             self.windows[i].height as u32,
                             self.windows[i].buffer,
@@ -534,7 +536,7 @@ impl Composer {
                             None
                         };
 
-                        (*(&raw mut DISPLAY_SERVER)).copy_to_db(
+                        display_server.copy_to_db(
                             self.windows[j].width as u32,
                             self.windows[j].height as u32,
                             self.windows[j].buffer,
@@ -547,7 +549,8 @@ impl Composer {
                 }
             }
 
-            (*(&raw mut DISPLAY_SERVER)).copy();
+            display_server.mark_dirty(0, 0, display_server.width as u32, display_server.height as u32);
+            display_server.copy();
         }
         self.update_tiling();
     }
@@ -597,6 +600,7 @@ impl Composer {
                         );
                     }
                 }
+                display_server.mark_dirty(0, 0, display_server.width as u32, display_server.height as u32);
                 display_server.copy();
             }
             self.update_tiling();
