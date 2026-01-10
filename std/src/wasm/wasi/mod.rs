@@ -9,8 +9,11 @@ pub struct Wasi;
 
 impl Wasi {
     pub fn register(interpreter: &mut Interpreter) {
-        let mod_name = "wasi_snapshot_preview1";
+        Self::register_module(interpreter, "wasi_snapshot_preview1");
+        Self::register_module(interpreter, "wasi_unstable");
+    }
 
+    fn register_module(interpreter: &mut Interpreter, mod_name: &str) {
         proc::register(interpreter, mod_name);
         clock::register(interpreter, mod_name);
         file::register(interpreter, mod_name);

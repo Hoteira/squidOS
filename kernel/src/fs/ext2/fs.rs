@@ -1184,9 +1184,27 @@ impl VfsNode for Ext2Node {
         Ok(())
     }
 
-    fn truncate(&mut self, _size: u64) -> Result<(), String> {
-        let _lock = unsafe { (&*self.fs).lock.lock() };
-        Err(String::from("Not supported"))
+    fn truncate(&mut self, size: u64) -> Result<(), String> {
+        let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
+        let _lock = fs.lock.lock();
+
+        if size == 0 {
+            // Support simple truncation to 0 for now
+            for i in 0..15 {
+                let block = self.inode.block[i];
+                if block != 0 {
+                    unsafe { (*fs_ptr).free_block(block) };
+                    self.inode.block[i] = 0;
+                }
+            }
+            self.inode.size = 0;
+            self.inode.blocks = 0;
+            unsafe { (*fs_ptr).write_inode(self.inode_idx, &self.inode) };
+            Ok(())
+        } else {
+            Err(String::from("Partial truncate not yet supported"))
+        }
     }
 }
 
@@ -1359,6 +1377,10 @@ impl Ext2Node {
     }
 
     fn create_node(&mut self, name: &str, mode: u16) -> Result<Box<dyn VfsNode>, String> {
+        if let Ok(_) = self.find_internal(name) {
+            return Err(String::from("File already exists"));
+        }
+
         let fs = unsafe { &mut *self.fs };
         let fs_ptr = fs as *mut Ext2;
 

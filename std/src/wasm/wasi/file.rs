@@ -1,9 +1,8 @@
 use crate::wasm::{Value, interpreter::Interpreter};
 use crate::rust_alloc::string::{String, ToString};
+use crate::rust_alloc::vec::Vec;
 
 pub fn register(interpreter: &mut Interpreter, mod_name: &str) {
-    // --- File Descriptors ---
-
     interpreter.add_host_function(mod_name, "fd_close", |_interp, args| {
         let fd = match args[0] { Value::I32(v) => v as usize, _ => return Some(Value::I32(28)) };
         crate::os::file_close(fd);
@@ -248,12 +247,19 @@ pub fn register(interpreter: &mut Interpreter, mod_name: &str) {
         if krake_path == "." || krake_path == "" { krake_path = String::from("@0xE0/"); }
         else if krake_path.starts_with('/') { krake_path = String::from("@0xE0") + &krake_path; }
         else if !krake_path.starts_with('@') { krake_path = String::from("@0xE0/") + &krake_path; }
-        let mut krake_flags = 0;
-        if (rights_base & 64) != 0 { krake_flags = 2; }
-        if (oflags & 1) != 0 { unsafe { crate::os::syscall(85, krake_path.as_ptr() as u64, krake_path.len() as u64, 0); } }
-        let fd = unsafe { crate::os::syscall(2, krake_path.as_ptr() as u64, krake_path.len() as u64, krake_flags) };
-        if fd == u64::MAX { return Some(Value::I32(44)); }
-        if opened_fd_ptr + 4 <= interp.memory.len() { interp.memory[opened_fd_ptr..opened_fd_ptr+4].copy_from_slice(&(fd as u32).to_le_bytes()); }
+                    let mut krake_flags = 0;
+                    if (rights_base & 64) != 0 { krake_flags = 2; }
+                    if (oflags & 1) != 0 { unsafe { crate::os::syscall(85, krake_path.as_ptr() as u64, krake_path.len() as u64, 0); } }
+                    
+                    let fd = unsafe { crate::os::syscall(2, krake_path.as_ptr() as u64, krake_path.len() as u64, krake_flags) };
+                    if fd == u64::MAX { return Some(Value::I32(44)); }
+        
+                    if (oflags & 8) != 0 { // O_TRUNC
+                        unsafe { crate::os::syscall(77, fd, 0, 0); } // SYS_FTRUNCATE to 0
+                    }
+        
+                    if opened_fd_ptr + 4 <= interp.memory.len() { interp.memory[opened_fd_ptr..opened_fd_ptr+4].copy_from_slice(&(fd as u32).to_le_bytes()); }
+        
         Some(Value::I32(0))
     });
 
@@ -296,5 +302,24 @@ pub fn register(interpreter: &mut Interpreter, mod_name: &str) {
         else if !krake_path.starts_with('@') { krake_path = String::from("@0xE0/") + &krake_path; }
         let res = unsafe { crate::os::syscall(87, krake_path.as_ptr() as u64, krake_path.len() as u64, 0) };
         Some(Value::I32(if res == 0 { 0 } else { 1 }))
+    });
+
+    // --- Pre-opened Directories ---
+
+    interpreter.add_host_function(mod_name, "fd_prestat_get", |interp, args| {
+        let fd = match args[0] { Value::I32(v) => v, _ => return Some(Value::I32(28)) };
+        let prestat_ptr = match args[1] { Value::I32(v) => v as usize, _ => return Some(Value::I32(28)) };
+        if fd == 3 {
+            if prestat_ptr + 8 < interp.memory.len() { interp.memory[prestat_ptr] = 0; interp.memory[prestat_ptr+4..prestat_ptr+8].copy_from_slice(&1u32.to_le_bytes()); }
+            return Some(Value::I32(0));
+        }
+        Some(Value::I32(8))
+    });
+
+    interpreter.add_host_function(mod_name, "fd_prestat_dir_name", |interp, args| {
+        let fd = match args[0] { Value::I32(v) => v, _ => return Some(Value::I32(28)) };
+        let path_ptr = match args[1] { Value::I32(v) => v as usize, _ => return Some(Value::I32(28)) };
+        if fd == 3 && path_ptr < interp.memory.len() { interp.memory[path_ptr] = b'/'; return Some(Value::I32(0)); }
+        Some(Value::I32(8))
     });
 }

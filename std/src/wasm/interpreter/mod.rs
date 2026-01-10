@@ -118,10 +118,15 @@ impl Interpreter {
         }
 
         if let Some(import) = target_import {
-            let host_fn_idx = self.host_functions.iter().position(|(m, n, _)| m == &import.module && n == &import.name).ok_or("Host not found")?;
-            let host_fn_ptr = &self.host_functions[host_fn_idx].2 as *const Box<dyn Fn(&mut Interpreter, Vec<Value>) -> Option<Value>>;
-            let host_fn = unsafe { &*host_fn_ptr };
-            return Ok(host_fn(self, args).unwrap_or(Value::I32(0)));
+            let host_fn_idx = self.host_functions.iter().position(|(m, n, _)| m == &import.module && n == &import.name);
+            if let Some(idx) = host_fn_idx {
+                let host_fn_ptr = &self.host_functions[idx].2 as *const Box<dyn Fn(&mut Interpreter, Vec<Value>) -> Option<Value>>;
+                let host_fn = unsafe { &*host_fn_ptr };
+                return Ok(host_fn(self, args).unwrap_or(Value::I32(0)));
+            } else {
+                crate::debugln!("WASM: Host not found: {}:{}", import.module, import.name);
+                return Err("Host not found");
+            }
         }
 
         let internal_idx = func_idx.checked_sub(func_import_count).ok_or("Func OOB")?;
@@ -224,6 +229,10 @@ impl Interpreter {
                     9 => { Leb128::decode_u32(bytecode, pc); }
                     10 => { Leb128::decode_u32(bytecode, pc); Leb128::decode_u32(bytecode, pc); }
                     11 => { Leb128::decode_u32(bytecode, pc); }
+                    12 => { Leb128::decode_u32(bytecode, pc); Leb128::decode_u32(bytecode, pc); }
+                    13 => { Leb128::decode_u32(bytecode, pc); }
+                    14 => { Leb128::decode_u32(bytecode, pc); Leb128::decode_u32(bytecode, pc); }
+                    15 | 16 | 17 => { Leb128::decode_u32(bytecode, pc); }
                     _ => {}
                 }
             }
