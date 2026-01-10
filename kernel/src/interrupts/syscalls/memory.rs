@@ -4,7 +4,7 @@ use crate::memory::address::PhysAddr;
 
 pub fn handle_brk(context: &mut CPUState) {
     let new_brk = context.rdi;
-    let mut tm = crate::interrupts::task::TASK_MANAGER.lock();
+    let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
     let current_idx = tm.current_task;
 
     if current_idx < 0 {
@@ -75,7 +75,7 @@ pub fn handle_mmap(context: &mut CPUState) {
     let _fd = context.r8;
     let _offset = context.r9;
 
-    let mut tm = crate::interrupts::task::TASK_MANAGER.lock();
+    let mut tm = crate::interrupts::task::TASK_MANAGER.int_lock();
     let current_idx = tm.current_task;
     
     if current_idx < 0 || len == 0 {

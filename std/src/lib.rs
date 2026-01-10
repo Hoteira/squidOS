@@ -19,6 +19,7 @@ pub mod rt;
 pub mod future;
 pub mod task;
 pub mod executor;
+pub mod wasm;
 
 #[cfg(feature = "userland")]
 pub mod runtime;

@@ -64,7 +64,7 @@ pub fn spawn_process(path: &str, args: Option<&[&str]>, fd_inheritance: Option<&
     }
 
     
-    let pid_idx = crate::interrupts::task::TASK_MANAGER.lock().reserve_pid().map_err(|_| String::from("No free process slots"))?;
+    let pid_idx = crate::interrupts::task::TASK_MANAGER.int_lock().reserve_pid().map_err(|_| String::from("No free process slots"))?;
     let pid = pid_idx as u64;
 
     
@@ -128,7 +128,7 @@ pub fn spawn_process(path: &str, args: Option<&[&str]>, fd_inheritance: Option<&
         }
         Err(e) => {
             
-            crate::interrupts::task::TASK_MANAGER.lock().kill_process(pid);
+            crate::interrupts::task::TASK_MANAGER.int_lock().kill_process(pid);
             Err(e)
         }
     }

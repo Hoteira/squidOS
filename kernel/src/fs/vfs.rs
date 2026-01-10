@@ -127,7 +127,7 @@ pub trait FileSystem: Send + Sync {
 }
 
 
-pub trait VfsNode {
+pub trait VfsNode: Send + Sync {
     fn name(&self) -> String;
     fn size(&self) -> u64;
     fn kind(&self) -> FileType;
@@ -155,6 +155,10 @@ pub trait VfsNode {
     }
 
     fn rename(&mut self, _old_name: &str, _new_name: &str) -> Result<(), String> {
+        Err(String::from("Not supported"))
+    }
+
+    fn truncate(&mut self, _size: u64) -> Result<(), String> {
         Err(String::from("Not supported"))
     }
 }

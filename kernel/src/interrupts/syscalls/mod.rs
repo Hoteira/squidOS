@@ -51,6 +51,8 @@ pub const SYS_GET_TICKS: u64 = 109;
 pub const SYS_GET_PROCESS_LIST: u64 = 110;
 pub const SYS_GET_PROCESS_MEM: u64 = 111;
 
+pub const SYS_FTRUNCATE: u64 = 77;
+
 pub const SYS_SPAWN_THREAD: u64 = 112;
 pub const SYS_THREAD_EXIT: u64 = 113;
 
@@ -156,6 +158,7 @@ pub extern "C" fn syscall_dispatcher(context: &mut CPUState) {
         SYS_GET_TICKS => misc::handle_ticks(context),
         SYS_GET_PROCESS_LIST => process::handle_get_process_list(context),
         SYS_GET_PROCESS_MEM => memory::handle_get_process_mem(context),
+        SYS_FTRUNCATE => fs::handle_ftruncate(context),
         
         SYS_SPAWN_THREAD => process::handle_spawn_thread(context),
         SYS_THREAD_EXIT => process::handle_thread_exit(context),

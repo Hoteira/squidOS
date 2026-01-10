@@ -49,6 +49,15 @@ impl File {
     pub fn from_raw_fd(fd: usize) -> Self {
         File { fd }
     }
+
+    pub fn set_len(&self, size: u64) -> Result<()> {
+        let res = crate::os::file_truncate(self.fd, size);
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(Error::from_raw_os_error(5))
+        }
+    }
 }
 
 impl Read for File {

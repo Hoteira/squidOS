@@ -64,6 +64,12 @@ pub fn file_seek(fd: usize, offset: i64, whence: usize) -> u64 {
     }
 }
 
+pub fn file_truncate(fd: usize, length: u64) -> i32 {
+    unsafe {
+        syscall(77, fd as u64, length, 0) as i32
+    }
+}
+
 pub fn pipe(fds: &mut [i32; 2]) -> i32 {
     unsafe {
         syscall(22, fds.as_mut_ptr() as u64, 0, 0) as i32

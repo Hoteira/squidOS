@@ -51,15 +51,51 @@ pub extern "C" fn main() -> i32 {
 
     println!("Desktop Environment Initialized.");
 
-
     std::os::exec("@0xE0/sys/bin/taskbar.elf");
 
-
     std::os::exec("@0xE0/sys/bin/term.elf");
+
+    test_wasm();
 
     loop {
         std::os::yield_task();
     }
 
     0
+}
+
+fn test_wasm() {
+    use std::wasm::parser::Parser;
+    use std::wasm::interpreter::Interpreter;
+    use std::wasm::wasi::Wasi;
+    use std::wasm::Value;
+    use alloc::vec;
+
+    debugln!("WASM: Starting WASI Test App...");
+    
+    if let Ok(mut file) = File::open("@0xE0/wasm_test.wasm") {
+        let size = file.size();
+        let mut buffer = vec![0u8; size];
+        if file.read(&mut buffer).is_ok() {
+            let mut parser = Parser::new(&buffer);
+            match parser.parse() {
+                Ok(module) => {
+                    debugln!("WASM: Module parsed successfully.");
+                    let mut interpreter = Interpreter::new();
+                    Wasi::register(&mut interpreter);
+                    
+                    // Standard WASI start function
+                    if let Some(func_idx) = module.find_export("_start") {
+                        match interpreter.call(&module, func_idx, vec![]) {
+                            Ok(_) => debugln!("WASM: Execution finished successfully."),
+                            Err(e) => debugln!("WASM: Execution error: {}", e),
+                        }
+                    }
+                }
+                Err(e) => debugln!("WASM: Parse error: {}", e),
+            }
+        }
+    } else {
+        debugln!("WASM: wasm_test.wasm not found at @0xE0/wasm_test.wasm");
+    }
 }

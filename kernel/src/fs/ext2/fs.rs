@@ -3,20 +3,23 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use crate::sync::Mutex;
 
 
 use crate::fs::disk;
 use crate::fs::ext2::structs::{BlockGroupDescriptor, Inode, Superblock};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Ext2 {
     disk_id: u8,
     base_lba: u64,
     pub superblock: Superblock,
     block_size: u64,
     inodes_per_group: u32,
+    inode_size: u16,
     cache_lba: Option<u64>,
     cache_data: [u8; 512],
+    pub lock: Mutex<()>,
 }
 
 impl Ext2 {
@@ -33,7 +36,7 @@ impl Ext2 {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), &mut superblock as *mut _ as *mut u8, size_of::<Superblock>());
         }
 
-        let magic = unsafe { *(buf.as_ptr().add(56) as *const u16) };
+        let magic = superblock.s_magic;
         crate::debugln!("Ext2: Magic: {:#x}", magic);
 
         if magic != 0xEF53 {
@@ -41,7 +44,8 @@ impl Ext2 {
         }
 
         let block_size = 1024 << superblock.log_block_size;
-        crate::debugln!("Ext2: Mounted. Block Size: {}", block_size);
+        let inode_size = if superblock.rev_level >= 1 { superblock.inode_size } else { 128 };
+        crate::debugln!("Ext2: Mounted. Block Size: {}, Inode Size: {}", block_size, inode_size);
 
         Ok(Box::new(Ext2 {
             disk_id,
@@ -49,11 +53,18 @@ impl Ext2 {
             superblock,
             block_size: block_size as u64,
             inodes_per_group: superblock.inodes_per_group,
+            inode_size,
             cache_lba: None,
             cache_data: [0; 512],
+            lock: Mutex::new(()),
         }))
     }
+}
 
+unsafe impl Send for Ext2 {}
+unsafe impl Sync for Ext2 {}
+
+impl Ext2 {
     fn read_disk_data(&mut self, offset: u64, buffer: &mut [u8]) {
         let abs_offset = offset + (self.base_lba * 512);
         let start_lba = abs_offset / 512;
@@ -163,11 +174,7 @@ impl Ext2 {
 
         let inode_table_offset = bg_desc.inode_table as u64 * self.block_size;
 
-        let inode_size = if self.superblock.rev_level >= 1 {
-            128
-        } else {
-            128
-        };
+        let inode_size = self.inode_size;
 
         let inode_offset = inode_table_offset + (index_in_group as u64 * inode_size as u64);
 
@@ -186,7 +193,7 @@ impl Ext2 {
         let index_in_group = (inode_idx - 1) % self.inodes_per_group;
         let bg_desc = self.read_block_group_descriptor(group);
         let inode_table_offset = bg_desc.inode_table as u64 * self.block_size;
-        let inode_size = 128;
+        let inode_size = self.inode_size;
         let inode_offset = inode_table_offset + (index_in_group as u64 * inode_size as u64);
 
         let ptr = inode as *const Inode as *const u8;
@@ -476,11 +483,18 @@ pub struct Ext2Node {
     name: String,
 }
 
+unsafe impl Send for Ext2Node {}
+unsafe impl Sync for Ext2Node {}
+
 impl FileSystem for Ext2 {
     fn root(&mut self) -> Result<Box<dyn VfsNode>, String> {
-        let inode = self.read_inode(2);
+        let self_ptr = self as *mut Ext2;
+        let inode = {
+            let _lock = self.lock.lock();
+            unsafe { (*self_ptr).read_inode(2) }
+        };
         Ok(Box::new(Ext2Node {
-            fs: self as *mut _,
+            fs: self_ptr,
             inode_idx: 2,
             inode,
             name: String::from("/"),
@@ -509,8 +523,12 @@ impl VfsNode for Ext2Node {
 
     fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<usize, String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
+        
         let total_size = self.size();
-        if offset >= total_size { return Ok(0); }
+        if offset >= total_size { 
+            return Ok(0); 
+        }
 
         let mut bytes_read = 0;
         let mut current_offset = offset;
@@ -524,10 +542,15 @@ impl VfsNode for Ext2Node {
         let start_block_offset = (current_offset % block_size) as usize;
         if start_block_offset != 0 {
             let block_idx = (current_offset / block_size) as u32;
-            let phys = fs.get_block_address(&self.inode, block_idx);
+            
+            let phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
             if phys != 0 {
-                fs.read_disk_data(phys as u64 * block_size, &mut bounce_buf);
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(phys as u64 * block_size, &mut bounce_buf) };
             } else {
                 bounce_buf.fill(0);
             }
@@ -544,14 +567,20 @@ impl VfsNode for Ext2Node {
         while (len - bytes_read) >= block_size as usize {
             let start_block_idx = (current_offset / block_size) as u32;
 
-            let start_phys = fs.get_block_address(&self.inode, start_block_idx);
+            let start_phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, start_block_idx) }
+            };
 
             let mut count = 1;
             let max_blocks = core::cmp::min(32, (len - bytes_read) / block_size as usize);
 
             if start_phys != 0 {
                 while count < max_blocks {
-                    let next_phys = fs.get_block_address(&self.inode, start_block_idx + count as u32);
+                    let next_phys = {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).get_block_address(&self.inode, start_block_idx + count as u32) }
+                    };
                     if next_phys == start_phys + count as u32 {
                         count += 1;
                     } else {
@@ -561,7 +590,10 @@ impl VfsNode for Ext2Node {
 
                 let chunk_size = count * block_size as usize;
                 let dest_slice = &mut buffer[buf_offset..buf_offset + chunk_size];
-                fs.read_disk_data(start_phys as u64 * block_size, dest_slice);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe { (*fs_ptr).read_disk_data(start_phys as u64 * block_size, dest_slice) };
+                }
 
                 bytes_read += chunk_size;
                 current_offset += chunk_size as u64;
@@ -580,10 +612,14 @@ impl VfsNode for Ext2Node {
 
         if bytes_read < len {
             let block_idx = (current_offset / block_size) as u32;
-            let phys = fs.get_block_address(&self.inode, block_idx);
+            let phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
             if phys != 0 {
-                fs.read_disk_data(phys as u64 * block_size, &mut bounce_buf);
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(phys as u64 * block_size, &mut bounce_buf) };
             } else {
                 bounce_buf.fill(0);
             }
@@ -599,6 +635,7 @@ impl VfsNode for Ext2Node {
 
     fn write(&mut self, offset: u64, buffer: &[u8]) -> Result<usize, String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
         let block_size = fs.block_size as u64;
 
         let mut bytes_written = 0;
@@ -612,41 +649,55 @@ impl VfsNode for Ext2Node {
             let block_idx = (current_offset / block_size) as u32;
             let block_offset = (current_offset % block_size) as usize;
 
-            let mut phys = fs.get_block_address(&self.inode, block_idx);
+            let mut phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
 
             if phys == 0 {
-                phys = fs.alloc_block();
-                if phys == 0 { return Err(String::from("No free blocks")); }
+                phys = {
+                    let _lock = fs.lock.lock();
+                    unsafe {
+                        let p = (*fs_ptr).alloc_block();
+                        if p != 0 {
+                            if let Ok(_) = (*fs_ptr).set_block_address(&mut self.inode, block_idx, p) {
+                                self.inode.blocks += (block_size / 512) as u32;
+                                (*fs_ptr).write_inode(self.inode_idx, &self.inode);
 
-
-                if let Err(e) = fs.set_block_address(&mut self.inode, block_idx, phys) {
-                    return Err(e);
-                }
-
-                self.inode.blocks += (block_size / 512) as u32;
-                fs.write_inode(self.inode_idx, &self.inode);
-
-
-                bounce_buf.fill(0);
-                fs.write_disk_data(phys as u64 * block_size, &bounce_buf);
+                                bounce_buf.fill(0);
+                                (*fs_ptr).write_disk_data(p as u64 * block_size, &bounce_buf);
+                            } else {
+                                return Err(String::from("Failed to allocate and set block"));
+                            }
+                        }
+                        p
+                    }
+                };
+                if phys == 0 { return Err(String::from("Failed to allocate block")); }
             }
 
 
             if block_offset != 0 || (len - bytes_written) < block_size as usize {
-                fs.read_disk_data(phys as u64 * block_size, &mut bounce_buf);
-
                 let to_copy = core::cmp::min(len - bytes_written, (block_size as usize) - block_offset);
-                bounce_buf[block_offset..block_offset + to_copy].copy_from_slice(&buffer[buf_offset..buf_offset + to_copy]);
-
-                fs.write_disk_data(phys as u64 * block_size, &bounce_buf);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe {
+                        (*fs_ptr).read_disk_data(phys as u64 * block_size, &mut bounce_buf);
+                        bounce_buf[block_offset..block_offset + to_copy].copy_from_slice(&buffer[buf_offset..buf_offset + to_copy]);
+                        (*fs_ptr).write_disk_data(phys as u64 * block_size, &bounce_buf);
+                    }
+                }
 
                 bytes_written += to_copy;
                 current_offset += to_copy as u64;
                 buf_offset += to_copy;
             } else {
                 let to_copy = block_size as usize;
-                fs.write_disk_data(phys as u64 * block_size, &buffer[buf_offset..buf_offset + to_copy]);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe { (*fs_ptr).write_disk_data(phys as u64 * block_size, &buffer[buf_offset..buf_offset + to_copy]) };
+                }
 
                 bytes_written += to_copy;
                 current_offset += to_copy as u64;
@@ -656,8 +707,9 @@ impl VfsNode for Ext2Node {
 
 
         if current_offset > self.inode.size as u64 {
+            let _lock = fs.lock.lock();
             self.inode.size = current_offset as u32;
-            fs.write_inode(self.inode_idx, &self.inode);
+            unsafe { (*fs_ptr).write_inode(self.inode_idx, &self.inode) };
         }
 
         Ok(bytes_written)
@@ -670,6 +722,7 @@ impl VfsNode for Ext2Node {
 
 
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
 
         let block_size = fs.block_size as usize;
 
@@ -689,11 +742,17 @@ impl VfsNode for Ext2Node {
 
             let block_idx = (offset / block_size as u64) as u32;
 
-            let phys = fs.get_block_address(&self.inode, block_idx);
+            let phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
 
             if phys != 0 {
-                fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe { (*fs_ptr).read_disk_data(phys as u64 * block_size as u64, &mut buf) };
+                }
 
 
                 let mut block_pos = 0;
@@ -726,7 +785,10 @@ impl VfsNode for Ext2Node {
 
                         
 
-                        let child_inode = fs.read_inode(entry.inode);
+                        let child_inode = {
+                            let _lock = fs.lock.lock();
+                            unsafe { (*fs_ptr).read_inode(entry.inode) }
+                        };
 
                         entries.push(Box::new(Ext2Node {
                             fs: self.fs,
@@ -747,7 +809,6 @@ impl VfsNode for Ext2Node {
             offset += block_size as u64;
         }
 
-
         Ok(entries)
     }
 
@@ -757,8 +818,11 @@ impl VfsNode for Ext2Node {
             return Err(String::from("Not a directory"));
         }
 
+        crate::debugln!("Ext2Node::find: '{}' in '{}'", name, self.name);
+
 
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
 
         let block_size = fs.block_size as usize;
 
@@ -775,11 +839,17 @@ impl VfsNode for Ext2Node {
         while offset < total_size {
             let block_idx = (offset / block_size as u64) as u32;
 
-            let phys = fs.get_block_address(&self.inode, block_idx);
+            let phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
 
             if phys != 0 {
-                fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe { (*fs_ptr).read_disk_data(phys as u64 * block_size as u64, &mut buf) };
+                }
 
 
                 let mut block_pos = 0;
@@ -803,7 +873,10 @@ impl VfsNode for Ext2Node {
 
 
                             if entry_name == name_bytes {
-                                let child_inode = fs.read_inode(entry.inode);
+                                let child_inode = {
+                                    let _lock = fs.lock.lock();
+                                    unsafe { (*fs_ptr).read_inode(entry.inode) }
+                                };
 
                                 return Ok(Box::new(Ext2Node {
                                     fs: self.fs,
@@ -826,7 +899,6 @@ impl VfsNode for Ext2Node {
             offset += block_size as u64;
         }
 
-
         Err(String::from("File not found"))
     }
 
@@ -841,6 +913,7 @@ impl VfsNode for Ext2Node {
 
     fn remove(&mut self, name: &str) -> Result<(), String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
 
         let mut buf = alloc::vec![0u8; fs.block_size as usize];
         let mut offset = 0;
@@ -848,10 +921,16 @@ impl VfsNode for Ext2Node {
 
         while offset < total_size {
             let block_off = offset - (offset % fs.block_size as u64);
-            let block_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+            let block_addr = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32) }
+            };
             let read_off = block_addr as u64 * fs.block_size as u64;
 
-            fs.read_disk_data(read_off, &mut buf);
+            {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(read_off, &mut buf) };
+            }
 
             let mut block_pos = 0;
             let mut prev_rec_len = 0;
@@ -879,19 +958,27 @@ impl VfsNode for Ext2Node {
                     }
 
 
-                    fs.write_disk_data(read_off, &buf);
+                    {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).write_disk_data(read_off, &buf) };
+                    }
 
 
-                    let mut target_inode = fs.read_inode(inode_to_free);
+                    let mut target_inode = {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).read_inode(inode_to_free) }
+                    };
 
                     let is_dir = (target_inode.mode & 0xF000) == 0x4000;
                     if is_dir {
                         let mut check_buf = alloc::vec![0u8; fs.block_size as usize];
-                        let _has_entries = false;
 
 
                         if target_inode.block[0] != 0 {
-                            fs.read_disk_data(target_inode.block[0] as u64 * fs.block_size as u64, &mut check_buf);
+                            {
+                                let _lock = fs.lock.lock();
+                                unsafe { (*fs_ptr).read_disk_data(target_inode.block[0] as u64 * fs.block_size as u64, &mut check_buf) };
+                            }
                             let mut check_pos = 0;
                             let mut entries_count = 0;
                             while check_pos < fs.block_size as usize {
@@ -913,18 +1000,24 @@ impl VfsNode for Ext2Node {
                     if target_inode.links_count > 0 {
                         target_inode.links_count -= 1;
                         if target_inode.links_count == 0 {
-                            for i in 0..12 {
-                                if target_inode.block[i] != 0 {
-                                    fs.free_block(target_inode.block[i]);
-                                    target_inode.block[i] = 0;
+                            {
+                                let _lock = fs.lock.lock();
+                                unsafe {
+                                    for i in 0..12 {
+                                        if target_inode.block[i] != 0 {
+                                            (*fs_ptr).free_block(target_inode.block[i]);
+                                            target_inode.block[i] = 0;
+                                        }
+                                    }
+
+
+                                    (*fs_ptr).write_inode(inode_to_free, &target_inode);
+                                    (*fs_ptr).free_inode(inode_to_free);
                                 }
                             }
-
-
-                            fs.write_inode(inode_to_free, &target_inode);
-                            fs.free_inode(inode_to_free);
                         } else {
-                            fs.write_inode(inode_to_free, &target_inode);
+                            let _lock = fs.lock.lock();
+                            unsafe { (*fs_ptr).write_inode(inode_to_free, &target_inode) };
                         }
                     }
 
@@ -942,6 +1035,7 @@ impl VfsNode for Ext2Node {
 
     fn read_dir(&mut self, start_index: u64, buffer: &mut [u8]) -> Result<(usize, usize), String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
         let block_size = fs.block_size as usize;
 
         let mut bytes_written = 0;
@@ -954,10 +1048,16 @@ impl VfsNode for Ext2Node {
 
         while offset < total_size {
             let block_idx = (offset / block_size as u64) as u32;
-            let phys = fs.get_block_address(&self.inode, block_idx);
+            let phys = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, block_idx) }
+            };
 
             if phys != 0 {
-                fs.read_disk_data(phys as u64 * block_size as u64, &mut block_buf);
+                {
+                    let _lock = fs.lock.lock();
+                    unsafe { (*fs_ptr).read_disk_data(phys as u64 * block_size as u64, &mut block_buf) };
+                }
 
                 let mut block_pos = 0;
                 while block_pos < block_size {
@@ -975,7 +1075,10 @@ impl VfsNode for Ext2Node {
                                 return Ok((bytes_written, count_read));
                             }
 
-                            let child_inode = fs.read_inode(entry.inode);
+                            let child_inode = {
+                                let _lock = fs.lock.lock();
+                                unsafe { (*fs_ptr).read_inode(entry.inode) }
+                            };
 
                             let mapped_type = if (child_inode.mode & 0xF000) == 0x4000 {
                                 2 
@@ -1013,10 +1116,12 @@ impl VfsNode for Ext2Node {
         Ok((bytes_written, count_read))
     }
     fn rename(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
-        let _child = self.find(old_name)?;
-
-
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
+        
+        let _child = self.find_internal(old_name)?;
+
+
         let mut buf = alloc::vec![0u8; fs.block_size as usize];
         let mut offset = 0;
         let total_size = self.size();
@@ -1026,10 +1131,16 @@ impl VfsNode for Ext2Node {
 
         while offset < total_size {
             let block_off = offset - (offset % fs.block_size as u64);
-            let block_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+            let block_addr = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32) }
+            };
             let read_off = block_addr as u64 * fs.block_size as u64;
 
-            fs.read_disk_data(read_off, &mut buf);
+            {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(read_off, &mut buf) };
+            }
             let mut block_pos = 0;
             while block_pos < fs.block_size as usize {
                 let ptr = unsafe { buf.as_ptr().add(block_pos) };
@@ -1050,28 +1161,212 @@ impl VfsNode for Ext2Node {
             offset += fs.block_size as u64;
         }
 
-        if target_inode == 0 { return Err(String::from("Old file not found")); }
+        if target_inode == 0 { 
+            return Err(String::from("Old file not found")); 
+        }
 
 
         self.add_directory_entry(target_inode, new_name, file_type)?;
 
 
-        let mut inode = fs.read_inode(target_inode);
+        let mut inode = {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).read_inode(target_inode) }
+        };
         inode.links_count += 1;
-        fs.write_inode(target_inode, &inode);
+        {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).write_inode(target_inode, &inode) };
+        }
 
-        self.remove(old_name)?;
+        self.remove_internal(old_name)?;
 
         Ok(())
+    }
+
+    fn truncate(&mut self, _size: u64) -> Result<(), String> {
+        let _lock = unsafe { (&*self.fs).lock.lock() };
+        Err(String::from("Not supported"))
     }
 }
 
 impl Ext2Node {
+    fn find_internal(&mut self, name: &str) -> Result<Box<dyn VfsNode>, String> {
+        if self.kind() != FileType::Directory {
+            return Err(String::from("Not a directory"));
+        }
+
+        let fs = unsafe { &mut *self.fs };
+        let block_size = fs.block_size as usize;
+        let mut buf = alloc::vec![0u8; block_size];
+        let mut offset = 0;
+        let total_size = self.size();
+        let name_bytes = name.as_bytes();
+
+        while offset < total_size {
+            let block_idx = (offset / block_size as u64) as u32;
+            let phys = fs.get_block_address(&self.inode, block_idx);
+
+            if phys != 0 {
+                fs.read_disk_data(phys as u64 * block_size as u64, &mut buf);
+                let mut block_pos = 0;
+                while block_pos < block_size {
+                    let ptr = unsafe { buf.as_ptr().add(block_pos) };
+                    let entry = unsafe { &*(ptr as *const DirectoryEntry) };
+                    if entry.rec_len == 0 { break; }
+                    if entry.inode != 0 {
+                        let name_len = entry.name_len as usize;
+                        if block_pos + 8 + name_len <= block_size {
+                            let entry_name_ptr = unsafe { ptr.add(8) };
+                            let entry_name = unsafe { core::slice::from_raw_parts(entry_name_ptr, name_len) };
+                            if entry_name == name_bytes {
+                                let child_inode = fs.read_inode(entry.inode);
+                                return Ok(Box::new(Ext2Node {
+                                    fs: self.fs,
+                                    inode_idx: entry.inode,
+                                    inode: child_inode,
+                                    name: String::from(name),
+                                }));
+                            }
+                        }
+                    }
+                    block_pos += entry.rec_len as usize;
+                }
+            }
+            offset += block_size as u64;
+        }
+        Err(String::from("File not found"))
+    }
+
+    fn remove_internal(&mut self, name: &str) -> Result<(), String> {
+        let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
+
+        let mut buf = alloc::vec![0u8; fs.block_size as usize];
+        let mut offset = 0;
+        let total_size = self.size();
+
+        while offset < total_size {
+            let block_off = offset - (offset % fs.block_size as u64);
+            let block_addr = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32) }
+            };
+            let read_off = block_addr as u64 * fs.block_size as u64;
+
+            {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(read_off, &mut buf) };
+            }
+
+            let mut block_pos = 0;
+            let mut prev_rec_len = 0;
+            let mut prev_pos = 0;
+
+            while block_pos < fs.block_size as usize {
+                let ptr = unsafe { buf.as_ptr().add(block_pos) };
+                let entry = unsafe { &mut *(ptr as *mut DirectoryEntry) };
+
+                if entry.rec_len == 0 { break; }
+
+                let name_len = entry.name_len as usize;
+                let name_ptr = unsafe { ptr.add(8) };
+                let entry_name = unsafe { core::slice::from_raw_parts(name_ptr, name_len) };
+
+                if entry_name == name.as_bytes() {
+                    let inode_to_free = entry.inode;
+
+                    if prev_rec_len > 0 {
+                        let prev_ptr = unsafe { buf.as_mut_ptr().add(prev_pos) };
+                        let prev_entry = unsafe { &mut *(prev_ptr as *mut DirectoryEntry) };
+                        prev_entry.rec_len += entry.rec_len;
+                    } else {
+                        entry.inode = 0;
+                    }
+
+
+                    {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).write_disk_data(read_off, &buf) };
+                    }
+
+
+                    let mut target_inode = {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).read_inode(inode_to_free) }
+                    };
+
+                    let is_dir = (target_inode.mode & 0xF000) == 0x4000;
+                    if is_dir {
+                        let mut check_buf = alloc::vec![0u8; fs.block_size as usize];
+                        if target_inode.block[0] != 0 {
+                            {
+                                let _lock = fs.lock.lock();
+                                unsafe { (*fs_ptr).read_disk_data(target_inode.block[0] as u64 * fs.block_size as u64, &mut check_buf) };
+                            }
+                            let mut check_pos = 0;
+                            let mut entries_count = 0;
+                            while check_pos < fs.block_size as usize {
+                                let c_ptr = unsafe { check_buf.as_ptr().add(check_pos) };
+                                let c_entry = unsafe { &*(c_ptr as *const DirectoryEntry) };
+                                if c_entry.rec_len == 0 { break; }
+                                if c_entry.inode != 0 {
+                                    entries_count += 1;
+                                }
+                                check_pos += c_entry.rec_len as usize;
+                            }
+
+                            if entries_count > 2 {
+                                return Err(String::from("Directory not empty"));
+                            }
+                        }
+                    }
+
+                    if target_inode.links_count > 0 {
+                        target_inode.links_count -= 1;
+                        if target_inode.links_count == 0 {
+                            {
+                                let _lock = fs.lock.lock();
+                                unsafe {
+                                    for i in 0..12 {
+                                        if target_inode.block[i] != 0 {
+                                            (*fs_ptr).free_block(target_inode.block[i]);
+                                            target_inode.block[i] = 0;
+                                        }
+                                    }
+
+
+                                    (*fs_ptr).write_inode(inode_to_free, &target_inode);
+                                    (*fs_ptr).free_inode(inode_to_free);
+                                }
+                            }
+                        } else {
+                            let _lock = fs.lock.lock();
+                            unsafe { (*fs_ptr).write_inode(inode_to_free, &target_inode) };
+                        }
+                    }
+
+                    return Ok(());
+                }
+
+                prev_pos = block_pos;
+                prev_rec_len = entry.rec_len;
+                block_pos += entry.rec_len as usize;
+            }
+            offset += fs.block_size as u64;
+        }
+        Err(String::from("File not found"))
+    }
+
     fn create_node(&mut self, name: &str, mode: u16) -> Result<Box<dyn VfsNode>, String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
 
 
-        let inode_id = fs.alloc_inode();
+        let inode_id = {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).alloc_inode() }
+        };
         if inode_id == 0 { return Err(String::from("No free inodes")); }
 
         let current_time = 0;
@@ -1097,11 +1392,17 @@ impl Ext2Node {
             osd2: [0; 3],
         };
 
-        fs.write_inode(inode_id, &new_inode);
+        {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).write_inode(inode_id, &new_inode) };
+        }
 
 
         if let Err(e) = self.add_directory_entry(inode_id, name, if (mode & 0xF000) == 0x4000 { 2 } else { 1 }) {
-            fs.free_inode(inode_id);
+            {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).free_inode(inode_id) };
+            }
             return Err(e);
         }
 
@@ -1115,6 +1416,7 @@ impl Ext2Node {
 
     fn add_directory_entry(&mut self, inode_id: u32, name: &str, file_type: u8) -> Result<(), String> {
         let fs = unsafe { &mut *self.fs };
+        let fs_ptr = fs as *mut Ext2;
         let name_len = name.len();
         if name_len > 255 { return Err(String::from("Name too long")); }
 
@@ -1129,10 +1431,16 @@ impl Ext2Node {
         while offset < total_size {
             let block_off = offset - (offset % fs.block_size as u64);
 
-            let block_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+            let block_addr = {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32) }
+            };
             let read_off = block_addr as u64 * fs.block_size as u64;
 
-            fs.read_disk_data(read_off, &mut buf);
+            {
+                let _lock = fs.lock.lock();
+                unsafe { (*fs_ptr).read_disk_data(read_off, &mut buf) };
+            }
 
             let mut block_pos = 0;
             while block_pos < fs.block_size as usize {
@@ -1164,9 +1472,15 @@ impl Ext2Node {
                     }
 
 
-                    let write_addr = fs.get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32);
+                    let write_addr = {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).get_block_address(&self.inode, (block_off / fs.block_size as u64) as u32) }
+                    };
                     let write_off = write_addr as u64 * fs.block_size as u64;
-                    fs.write_disk_data(write_off, &buf);
+                    {
+                        let _lock = fs.lock.lock();
+                        unsafe { (*fs_ptr).write_disk_data(write_off, &buf) };
+                    }
 
                     return Ok(());
                 }
@@ -1178,16 +1492,22 @@ impl Ext2Node {
         }
 
 
-        let new_block = fs.alloc_block();
+        let new_block = {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).alloc_block() }
+        };
         if new_block == 0 { return Err(String::from("No space for dir entry")); }
 
 
         let block_idx = self.inode.blocks / (fs.block_size as u32 / 512);
         if block_idx < 12 {
-            self.inode.block[block_idx as usize] = new_block;
-            self.inode.blocks += fs.block_size as u32 / 512;
-            self.inode.size += fs.block_size as u32;
-            fs.write_inode(self.inode_idx, &self.inode);
+            {
+                let _lock = fs.lock.lock();
+                self.inode.block[block_idx as usize] = new_block;
+                self.inode.blocks += fs.block_size as u32 / 512;
+                self.inode.size += fs.block_size as u32;
+                unsafe { (*fs_ptr).write_inode(self.inode_idx, &self.inode) };
+            }
         } else {
             return Err(String::from("Dir too large"));
         }
@@ -1205,7 +1525,10 @@ impl Ext2Node {
             core::ptr::copy_nonoverlapping(name.as_ptr(), name_dest, name_len);
         }
 
-        fs.write_disk_data(new_block as u64 * fs.block_size as u64, &buf);
+        {
+            let _lock = fs.lock.lock();
+            unsafe { (*fs_ptr).write_disk_data(new_block as u64 * fs.block_size as u64, &buf) };
+        }
 
         Ok(())
     }

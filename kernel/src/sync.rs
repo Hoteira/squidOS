@@ -8,8 +8,6 @@ pub struct Mutex<T> {
 
 impl<T: core::fmt::Debug> core::fmt::Debug for Mutex<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // We can't easily lock here without potentially deadlocking during a panic/debug print
-        // so we'll just indicate if it's locked or show the data if we can (unsafe)
         f.debug_struct("Mutex")
             .field("locked", &self.lock.load(Ordering::Relaxed))
             .finish()
